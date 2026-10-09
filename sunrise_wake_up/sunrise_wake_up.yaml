@@ -1,0 +1,272 @@
+blueprint:
+  name: Sunrise Wake-up — Manual Time or Next Alarm
+  description: >
+    A gentle simulated sunrise that FINISHES at your wake-up time. Choose a
+    daily manual time or a timestamp sensor such as Android's Next Alarm.
+    Brightness rises slowly at first, while tunable-white lights move from
+    warm white toward daylight. No Time & Date integration or helpers required.
+    Checks the schedule every 15 seconds. Turning any selected light off during
+    the ramp cancels the entire sunrise. The finish time is captured when the
+    run starts; subsequent phone-alarm changes do not move an active sunrise.
+  domain: automation
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    lights:
+      name: Wake-up lights
+      description: Select dimmable lights. Tunable-white lights also change color temperature.
+      selector:
+        entity:
+          filter:
+            - domain: light
+          multiple: true
+    time_source:
+      name: Wake-up time source
+      default: manual
+      selector:
+        select:
+          options:
+            - label: Manual wake-up time
+              value: manual
+            - label: Smartphone next alarm
+              value: next_alarm
+    wake_up_time:
+      name: Manual wake-up time
+      description: Sunrise ends at this time, using Home Assistant's local time zone. Used only in manual mode.
+      default: "07:00:00"
+      selector:
+        time: {}
+    next_alarm_sensor:
+      name: Next alarm sensor
+      description: >
+        Used only in next-alarm mode. Select a sensor whose state contains the
+        alarm date and time, preferably with a time-zone offset. Android provides
+        this through the Companion App's Next Alarm sensor. iPhone needs a
+        separately supplied timestamp sensor. Missing or invalid alarms are
+        skipped; there is no fallback to the manual time.
+      default: []
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: timestamp
+          multiple: true
+    sunrise_duration:
+      name: Sunrise duration
+      description: Minutes BEFORE the wake-up time. For 07:00 and 30 minutes, sunrise starts at 06:30.
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 120
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+    weekdays:
+      name: Wake-up days
+      description: Applies to the day of the wake-up time, including when sunrise starts the previous evening. Empty means every day.
+      default: []
+      selector:
+        select:
+          multiple: true
+          options:
+            - { label: Monday, value: mon }
+            - { label: Tuesday, value: tue }
+            - { label: Wednesday, value: wed }
+            - { label: Thursday, value: thu }
+            - { label: Friday, value: fri }
+            - { label: Saturday, value: sat }
+            - { label: Sunday, value: sun }
+    initial_brightness:
+      name: Starting brightness
+      description: Increase if your bulbs flicker at low brightness. Clamped to the final brightness.
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+    final_brightness:
+      name: Final brightness
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+    warm_kelvin:
+      name: Starting color temperature
+      description: Automatically limited to each light's supported range. Ignored by lights without color-temperature support.
+      default: 2000
+      selector:
+        number:
+          min: 1500
+          max: 6500
+          step: 100
+          unit_of_measurement: K
+    daylight_kelvin:
+      name: Final color temperature
+      default: 5500
+      selector:
+        number:
+          min: 1500
+          max: 6500
+          step: 100
+          unit_of_measurement: K
+    step_seconds:
+      name: Update interval
+      description: Lights supporting transitions fade smoothly between updates. Try 10–30 seconds.
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 60
+          step: 1
+          unit_of_measurement: s
+    after_sunrise:
+      name: Actions at wake-up time
+      description: Optional actions after successful completion, such as playing music. Not run after cancellation.
+      default: []
+      selector:
+        action: {}
+
+mode: single
+max_exceeded: silent
+
+triggers:
+  - trigger: time_pattern
+    seconds: "/15"
+
+variables:
+  light_ids: !input lights
+  source: !input time_source
+  manual_time: !input wake_up_time
+  alarm_sensors: !input next_alarm_sensor
+  minutes: !input sunrise_duration
+  allowed_days: !input weekdays
+  low_brightness: !input initial_brightness
+  high_brightness: !input final_brightness
+  warm: !input warm_kelvin
+  daylight: !input daylight_kelvin
+  interval: !input step_seconds
+  duration_seconds: "{{ (minutes | float) * 60 }}"
+  wake_timestamp: >-
+    {% if source == 'next_alarm' %}
+      {{ as_timestamp(states(alarm_sensors[0]), 0) if alarm_sensors | length == 1 else 0 }}
+    {% else %}
+      {% set wake = today_at(manual_time) %}
+      {% if wake <= now() %}{% set wake = wake + timedelta(days=1) %}{% endif %}
+      {{ as_timestamp(wake) }}
+    {% endif %}
+  start_timestamp: "{{ (wake_timestamp | float) - (duration_seconds | float) }}"
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ light_ids | length > 0 and wake_timestamp | float > 0
+         and start_timestamp | float <= as_timestamp(now()) < wake_timestamp | float }}
+  - condition: template
+    value_template: >-
+      {{ allowed_days | length == 0 or
+         (wake_timestamp | float | timestamp_custom('%a', true) | lower) in allowed_days }}
+  # last_triggered is read BEFORE this run updates it. This blocks repeated
+  # starts within this sunrise window, including after manual cancellation.
+  - condition: template
+    value_template: >-
+      {{ as_timestamp(this.attributes.get('last_triggered'), 0) < start_timestamp | float }}
+  - condition: template
+    value_template: >-
+      {{ expand(light_ids) | list | length > 0 and
+         expand(light_ids) | rejectattr('state', 'in', ['on', 'off']) | list | length == 0 }}
+
+actions:
+  - condition: template
+    value_template: >-
+      {{ wake_timestamp | float > 0 and
+         start_timestamp | float <= as_timestamp(now()) < wake_timestamp | float }}
+  # Freeze this run's deadline. A phone may clear its Next Alarm just before
+  # it rings; that must not prevent this sunrise from reaching its endpoint.
+  - variables:
+      finish: "{{ wake_timestamp | float }}"
+      beginning: "{{ start_timestamp | float }}"
+      members: "{{ expand(light_ids) | map(attribute='entity_id') | list }}"
+      initial_progress: "{{ [[(as_timestamp(now()) - beginning) / (duration_seconds | float), 0] | max, 1] | min }}"
+      initial_level: "{{ ([low_brightness | float, high_brightness | float] | min) + ((high_brightness | float) - ([low_brightness | float, high_brightness | float] | min)) * (initial_progress ** 2) }}"
+      initial_kelvin: "{{ 1000000 / ((1000000 / (warm | float)) + ((1000000 / (daylight | float)) - (1000000 / (warm | float))) * initial_progress) }}"
+  - repeat:
+      for_each: "{{ members }}"
+      sequence:
+        - action: light.turn_on
+          target:
+            entity_id: "{{ repeat.item }}"
+          data: >-
+            {% set payload = dict(brightness_pct=initial_level | round(0) | int, transition=0) %}
+            {% if 'color_temp' in (state_attr(repeat.item, 'supported_color_modes') or []) %}
+              {% set lower = state_attr(repeat.item, 'min_color_temp_kelvin') | float(warm) %}
+              {% set upper = state_attr(repeat.item, 'max_color_temp_kelvin') | float(daylight) %}
+              {% set k = [[initial_kelvin | float, lower] | max, upper] | min %}
+              {% set payload = dict(payload, color_temp_kelvin=k | round(0) | int) %}
+            {% endif %}
+            {{ payload }}
+  # Allow state reports from bulbs to arrive before monitoring cancellation.
+  - delay:
+      seconds: 2
+  - repeat:
+      while:
+        - condition: template
+          value_template: "{{ as_timestamp(now()) < finish }}"
+        - condition: template
+          value_template: "{{ expand(members) | selectattr('state', 'eq', 'on') | list | length == members | length }}"
+      sequence:
+        - variables:
+            fade_seconds: "{{ [interval | float, [finish - as_timestamp(now()), 0] | max] | min }}"
+            progress: "{{ [[(as_timestamp(now()) + fade_seconds - beginning) / (duration_seconds | float), 0] | max, 1] | min }}"
+            level: "{{ ([low_brightness | float, high_brightness | float] | min) + ((high_brightness | float) - ([low_brightness | float, high_brightness | float] | min)) * (progress ** 2) }}"
+            kelvin: "{{ 1000000 / ((1000000 / (warm | float)) + ((1000000 / (daylight | float)) - (1000000 / (warm | float))) * progress) }}"
+        - repeat:
+            for_each: "{{ members }}"
+            sequence:
+              - condition: template
+                value_template: "{{ is_state(repeat.item, 'on') }}"
+              - action: light.turn_on
+                target:
+                  entity_id: "{{ repeat.item }}"
+                data: >-
+                  {% set payload = dict(brightness_pct=level | round(0) | int, transition=fade_seconds) %}
+                  {% if 'color_temp' in (state_attr(repeat.item, 'supported_color_modes') or []) %}
+                    {% set lower = state_attr(repeat.item, 'min_color_temp_kelvin') | float(warm) %}
+                    {% set upper = state_attr(repeat.item, 'max_color_temp_kelvin') | float(daylight) %}
+                    {% set k = [[kelvin | float, lower] | max, upper] | min %}
+                    {% set payload = dict(payload, color_temp_kelvin=k | round(0) | int) %}
+                  {% endif %}
+                  {{ payload }}
+        - wait_template: "{{ expand(members) | selectattr('state', 'eq', 'on') | list | length != members | length }}"
+          timeout:
+            seconds: "{{ fade_seconds }}"
+          continue_on_timeout: true
+        - if:
+            - condition: template
+              value_template: "{{ wait.completed }}"
+          then:
+            - stop: Sunrise cancelled because a light was switched off or became unavailable.
+  - condition: template
+    value_template: "{{ as_timestamp(now()) >= finish and expand(members) | selectattr('state', 'eq', 'on') | list | length == members | length }}"
+  - repeat:
+      for_each: "{{ members }}"
+      sequence:
+        - action: light.turn_on
+          target:
+            entity_id: "{{ repeat.item }}"
+          data: >-
+            {% set payload = dict(brightness_pct=high_brightness | int, transition=0) %}
+            {% if 'color_temp' in (state_attr(repeat.item, 'supported_color_modes') or []) %}
+              {% set lower = state_attr(repeat.item, 'min_color_temp_kelvin') | float(warm) %}
+              {% set upper = state_attr(repeat.item, 'max_color_temp_kelvin') | float(daylight) %}
+              {% set k = [[daylight | float, lower] | max, upper] | min %}
+              {% set payload = dict(payload, color_temp_kelvin=k | round(0) | int) %}
+            {% endif %}
+            {{ payload }}
+  - choose: []
+    default: !input after_sunrise
