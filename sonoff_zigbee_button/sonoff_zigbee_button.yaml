@@ -3,8 +3,9 @@ blueprint:
   description: >-
     Assign actions to press, double press, and hold on a SONOFF Zigbee button
     paired through ZHA. Supports devices reported as eWeLink WB01 or SNZB-01P.
-    Empty gestures are ignored without interrupting running actions. Choose how additional
-    button presses are handled while an action sequence is still running.
+    Empty gestures are ignored without interrupting running actions. Choose how
+    additional button presses are handled while an action sequence is still
+    running, and optionally log presses ignored because the automation is busy.
   domain: automation
   homeassistant:
     min_version: "2024.10.0"
@@ -28,8 +29,9 @@ blueprint:
       description: >-
         single ignores new presses while actions run; restart stops the current
         sequence and starts the new one; queued runs sequences in order;
-        parallel runs them concurrently. Queued and parallel modes allow up to
-        10 runs. See https://www.home-assistant.io/docs/automation/modes/.
+        parallel runs them concurrently. Choose queued to retain presses during
+        long actions, up to 10 active and waiting runs. Parallel also allows up
+        to 10 runs. See https://www.home-assistant.io/docs/automation/modes/.
       default: single
       selector:
         select:
@@ -38,6 +40,22 @@ blueprint:
             - restart
             - queued
             - parallel
+    ignored_press_log_level:
+      name: Ignored press logging
+      description: >-
+        Choose Warning to log configured gestures ignored while single mode is
+        busy or when queued/parallel mode reaches its 10-run limit. Silent keeps
+        the existing behavior. Empty gesture actions are filtered before this
+        check and do not produce these warnings. Logging does not change how
+        gestures are handled.
+      default: silent
+      selector:
+        select:
+          options:
+            - label: Silent
+              value: silent
+            - label: Warning
+              value: warning
     press_action:
       name: Press Action
       description: Actions to perform on a single press. Leave empty to do nothing.
@@ -58,7 +76,7 @@ blueprint:
         action: {}
 
 mode: !input mode
-max_exceeded: silent
+max_exceeded: !input ignored_press_log_level
 
 triggers:
   - trigger: event

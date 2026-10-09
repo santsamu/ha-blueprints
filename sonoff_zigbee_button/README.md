@@ -40,6 +40,7 @@ The matching gesture's action list is exposed as a trigger variable so the condi
 | --- | --- | --- |
 | Button | Required | One supported button paired through ZHA. |
 | Automation mode | `single` | Determines how new gestures are handled while actions are running. |
+| Ignored press logging | `silent` | Select `warning` to log configured gestures rejected because single mode is busy or queued/parallel mode reaches its run limit. |
 | Press Action | None | Actions for a single press (`toggle`). |
 | Double Press Action | None | Actions for a double press (`on`). |
 | Hold Action | None | Actions for hold (`off`). |
@@ -55,7 +56,11 @@ The command names identify button gestures; they do not force your configured ac
 | `queued` | Run sequences in the order gestures arrive. |
 | `parallel` | Run each gesture's sequence concurrently. |
 
-Queued and parallel modes use Home Assistant's default limit of **10 runs**; queued includes the active run and waiting runs. Requests exceeding the limit are ignored. With `single`, requests during an active run are also ignored. The blueprint suppresses warnings for these ignored requests with `max_exceeded: silent`. See [Automation modes](https://www.home-assistant.io/docs/automation/modes/).
+Queued and parallel modes use Home Assistant's default limit of **10 runs**; queued includes the active run and waiting runs. Requests exceeding the limit are ignored. With `single`, requests during an active run are also ignored. See [Automation modes](https://www.home-assistant.io/docs/automation/modes/).
+
+Choose **queued** when a configured gesture should wait its turn while another action is running. For example, if a press action contains a 30-second delay, `single` ignores a double press during that delay; `queued` saves it and runs its action after the press sequence finishes. Queued actions can therefore execute later than the physical press, and further gestures are still ignored when the 10-run limit is reached. Use `restart` if the new gesture should interrupt the current sequence, or `parallel` if the actions can safely run at the same time.
+
+Set **Ignored press logging** to **Warning** when troubleshooting missed presses. Home Assistant logs **Already running** for a busy `single` automation and **Maximum number of runs exceeded** for a full queue or parallel run limit. Logging defaults to **Silent**, preserving existing automations' behavior. This option reports rejected runs; it does not replay presses or change the automation mode. Empty gesture actions are filtered by the condition and do not produce these warnings.
 
 Hold runs its configured sequence once for each matching hold event. It does not add repeated actions while the button stays held or a separate release action.
 
@@ -65,7 +70,7 @@ Test all three gestures using short actions you can observe, such as changing a 
 
 If nothing happens, open **Developer tools > Events**, listen to `zha_event`, and operate the button. Confirm that the event's `device_id` matches the selected button and its `command` is `toggle` for press, `on` for double press, or `off` for hold. These are the mappings used by the supplied reference; actual device events should be checked on your installation.
 
-If the button is absent from the picker, check that it is paired through ZHA and that its manufacturer and model match the requirements above. If presses are ignored while an action is running, check the selected automation mode and any long delays or waits in your actions.
+If the button is absent from the picker, check that it is paired through ZHA and that its manufacturer and model match the requirements above. If presses are ignored while an action is running, set **Ignored press logging** to **Warning**, check Home Assistant's logs, and inspect the selected mode and any long delays or waits in your actions. Consider `queued` when gestures should wait for the current sequence to finish.
 
 Home Assistant's **Run actions** control has no button trigger ID, so it does not select a gesture branch. Test by operating the actual button.
 
