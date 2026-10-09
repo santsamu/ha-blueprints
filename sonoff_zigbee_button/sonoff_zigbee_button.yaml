@@ -1,0 +1,96 @@
+blueprint:
+  name: Sonoff Zigbee Button
+  description: >-
+    Assign actions to press, double press, and hold on a SONOFF Zigbee button
+    paired through ZHA. Supports devices reported as eWeLink WB01 or SNZB-01P.
+    Leave an action empty to do nothing for that gesture. Choose how additional
+    button presses are handled while an action sequence is still running.
+  domain: automation
+  homeassistant:
+    min_version: "2024.10.0"
+  source_url: https://github.com/santsamu/ha-blueprints/blob/main/sonoff_zigbee_button/sonoff_zigbee_button.yaml
+  input:
+    button_id:
+      name: Button
+      description: Select the SONOFF button paired through Zigbee Home Automation (ZHA).
+      selector:
+        device:
+          filter:
+            - integration: zha
+              manufacturer: eWeLink
+              model: WB01
+            - integration: zha
+              manufacturer: eWeLink
+              model: SNZB-01P
+          multiple: false
+    mode:
+      name: Automation mode
+      description: >-
+        single ignores new presses while actions run; restart stops the current
+        sequence and starts the new one; queued runs sequences in order;
+        parallel runs them concurrently. Queued and parallel modes allow up to
+        10 runs. See https://www.home-assistant.io/docs/automation/modes/.
+      default: single
+      selector:
+        select:
+          options:
+            - single
+            - restart
+            - queued
+            - parallel
+    press_action:
+      name: Press Action
+      description: Actions to perform on a single press. Leave empty to do nothing.
+      default: []
+      selector:
+        action: {}
+    double_press_action:
+      name: Double Press Action
+      description: Actions to perform on a double press. Leave empty to do nothing.
+      default: []
+      selector:
+        action: {}
+    hold_action:
+      name: Hold Action
+      description: Actions to perform on hold. Leave empty to do nothing.
+      default: []
+      selector:
+        action: {}
+
+mode: !input mode
+max_exceeded: silent
+
+triggers:
+  - trigger: event
+    event_type: zha_event
+    event_data:
+      device_id: !input button_id
+      command: "toggle"
+    id: press
+  - trigger: event
+    event_type: zha_event
+    event_data:
+      device_id: !input button_id
+      command: "on"
+    id: double_press
+  - trigger: event
+    event_type: zha_event
+    event_data:
+      device_id: !input button_id
+      command: "off"
+    id: hold
+
+actions:
+  - choose:
+      - conditions:
+          - condition: trigger
+            id: press
+        sequence: !input press_action
+      - conditions:
+          - condition: trigger
+            id: double_press
+        sequence: !input double_press_action
+      - conditions:
+          - condition: trigger
+            id: hold
+        sequence: !input hold_action
