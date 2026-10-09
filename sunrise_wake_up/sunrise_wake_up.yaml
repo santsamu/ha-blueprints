@@ -9,6 +9,7 @@ blueprint:
     Checks the schedule every 15 seconds. Turning any selected light off during
     the ramp cancels the entire sunrise. The finish time is captured when the
     run starts; subsequent phone-alarm changes do not move an active sunrise.
+    An optional daily time range filters out next alarms by their local alarm time.
     Recovery resumes only before that deadline and while all lights remain on.
   domain: automation
   homeassistant:
@@ -57,6 +58,27 @@ blueprint:
             - domain: sensor
               device_class: timestamp
           multiple: false
+    next_alarm_ignore_enabled:
+      name: Ignore next alarms in a time range
+      description: >
+        Skip next alarms whose scheduled time falls in the daily range below,
+        using Home Assistant's local time zone. There is no manual-time fallback.
+        Used only in next-alarm mode; active sunrises and recovery keep their original deadline.
+      default: false
+      selector:
+        boolean: {}
+    next_alarm_ignore_start:
+      name: Next-alarm ignore range start
+      description: Start of the daily ignore range, inclusive, using Home Assistant's local time zone.
+      default: "09:00:00"
+      selector:
+        time: {}
+    next_alarm_ignore_end:
+      name: Next-alarm ignore range end
+      description: End of the daily ignore range, exclusive. Ranges can cross midnight; equal start and end times disable the range.
+      default: "21:00:00"
+      selector:
+        time: {}
     sunrise_duration:
       name: Sunrise duration
       description: Minutes BEFORE the wake-up time. For 07:00 and 30 minutes, sunrise starts at 06:30.
@@ -170,6 +192,9 @@ variables:
   source: !input time_source
   manual_time: !input wake_up_time
   alarm_sensor: !input next_alarm_sensor
+  alarm_ignore_enabled: !input next_alarm_ignore_enabled
+  alarm_ignore_start: !input next_alarm_ignore_start
+  alarm_ignore_end: !input next_alarm_ignore_end
   minutes: !input sunrise_duration
   allowed_days: !input weekdays
   low_brightness: !input initial_brightness
@@ -194,7 +219,16 @@ variables:
       {# Keep existing automations with a legacy one-item selection working. #}
       {% set sensor = alarm_sensor if alarm_sensor is string else
          (alarm_sensor[0] if alarm_sensor is sequence and alarm_sensor | length == 1 else '') %}
-      {{ as_timestamp(states(sensor), 0) if sensor else 0 }}
+      {% set alarm = as_timestamp(states(sensor), 0) if sensor else 0 %}
+      {% if alarm_ignore_enabled and alarm > 0 and alarm_ignore_start != alarm_ignore_end %}
+        {% set alarm_time = alarm | timestamp_custom('%H:%M:%S', true) %}
+        {% set ignored = (alarm_ignore_start <= alarm_time < alarm_ignore_end)
+           if alarm_ignore_start < alarm_ignore_end else
+           (alarm_time >= alarm_ignore_start or alarm_time < alarm_ignore_end) %}
+        {{ 0 if ignored else alarm }}
+      {% else %}
+        {{ alarm }}
+      {% endif %}
     {% else %}
       {% set wake = today_at(manual_time) %}
       {% if wake <= now() %}{% set wake = wake + timedelta(days=1) %}{% endif %}

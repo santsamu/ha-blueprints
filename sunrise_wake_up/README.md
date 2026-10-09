@@ -52,6 +52,10 @@ For an iPhone, supply a timestamp sensor separately, as described in the bluepri
 
 Missing, invalid, or expired alarms are skipped. This mode does not fall back to the manual wake-up time. Once a sunrise starts, its finish time is fixed: changing or clearing the phone alarm does not move or cancel that active run.
 
+Enable **Ignore next alarms in a time range** to skip alarms whose **scheduled time** falls within a daily range in Home Assistant's local time zone. For example, **09:00–21:00** ignores daytime alarms. The range checks the alarm time, rather than the time when the sensor is checked or the sunrise begins.
+
+The start is included and the end is excluded: an alarm at 09:00 is ignored, while one at 21:00 is allowed. Ranges can cross midnight; **22:00–06:00** ignores late-night and early-morning alarms. Equal start and end times disable the range. The option defaults to off, applies only to next-alarm mode, and has no manual-time fallback. The sensor exposes only its next alarm, so the blueprint cannot look past an ignored alarm to find a later one. Already-started sunrises, including restart recovery, keep their original deadline even if the range or phone alarm changes.
+
 ## Settings
 
 | Setting | Default | Details |
@@ -60,6 +64,9 @@ Missing, invalid, or expired alarms are skipped. This mode does not fall back to
 | Wake-up time source | Manual wake-up time | Choose a fixed daily time or a smartphone next alarm. |
 | Manual wake-up time | `07:00:00` | Finish time in Home Assistant's local time zone; used only in manual mode. |
 | Next alarm sensor | None | Select exactly one timestamp sensor for next-alarm mode; ignored in manual mode. |
+| Ignore next alarms in a time range | Off | Skip alarms scheduled inside the daily local-time range; applies to new next-alarm runs. |
+| Next-alarm ignore range start | `09:00:00` | Inclusive start; used when the ignore range is enabled. |
+| Next-alarm ignore range end | `21:00:00` | Exclusive end; supports crossing midnight. Equal start and end disable the range. |
 | Sunrise duration | 30 minutes | Time before wake-up to begin the sunrise; 5–120 minutes. |
 | Wake-up days | Every day | Applies to the day of the wake-up time, even if the sunrise starts the previous evening. |
 | Starting brightness | 1% | 1–100%; limited to the final brightness if set higher. Raise this if bulbs flicker at low brightness. |
@@ -122,7 +129,7 @@ To check recovery, select a recovery helper, start a sunrise, then reload automa
 | Trace reports missing dimming support | Inspect `unsupported_lights` in the trace and each entity's `supported_color_modes`. Remove on/off-only lights, or check the integration if a dimmable bulb reports missing or unknown capabilities. |
 | Sunrise stops just after turning lights on | Check the automation trace for a startup timeout. All selected lights must report `on` within 15 seconds of the initial commands completing, or before wake-up time if sooner. Check bulb connectivity and state updates. |
 | Interrupted sunrise does not resume | Check the dedicated recovery helper, its saved running state, the original finish time, and the selected lights. Recovery requires all lights to be available and already on; an off light cancels recovery. |
-| Next-alarm mode does nothing | Select exactly one timestamp sensor and check its state in Home Assistant. It must contain a valid future alarm date and time. |
+| Next-alarm mode does nothing | Select exactly one timestamp sensor and check its state in Home Assistant. It must contain a valid future alarm date and time outside any enabled ignore range. |
 | Wrong phone alarm is used | Check the Android sensor's package information and allow list. |
 | Lights flicker or visibly step | Increase starting brightness for flicker. Lights without reported transition support use steps; reduce the update interval for smaller changes. |
 | Color temperature does not change | Check the light's color-temperature support and range. Brightness-only lights skip color changes. |
