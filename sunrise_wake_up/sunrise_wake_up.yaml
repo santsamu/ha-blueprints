@@ -335,9 +335,8 @@ actions:
           value_template: "{{ expand(members) | selectattr('state', 'eq', 'on') | list | length == members | length }}"
       sequence:
         - variables:
-            fade_seconds: "{{ [interval | float, [finish - as_timestamp(now()), 0] | max] | min }}"
-            progress: "{{ [[(as_timestamp(now()) + fade_seconds - beginning) / (duration_seconds | float), 0] | max, 1] | min }}"
-            current_progress: "{{ [[(as_timestamp(now()) - beginning) / (duration_seconds | float), 0] | max, 1] | min }}"
+            # Capture the endpoint before calls; their latency consumes this interval.
+            step_deadline: "{{ [as_timestamp(now()) + (interval | float), finish] | min }}"
         - repeat:
             for_each: "{{ members }}"
             sequence:
@@ -348,14 +347,17 @@ actions:
                   entity_id: "{{ repeat.item }}"
                 data: >-
                   {% set can_fade = (state_attr(repeat.item, 'supported_features') | int(0) | bitwise_and(32)) != 0 %}
-                  {# A stepping light must not jump ahead to the next interval's endpoint. #}
-                  {% set p = progress if can_fade else current_progress %}
+                  {% set current = as_timestamp(now()) %}
+                  {% set remaining = [step_deadline - current, 0] | max %}
+                  {# Later bulbs share the deadline; missed endpoints catch up immediately. #}
+                  {% set target_time = ([step_deadline, current] | max) if can_fade else current %}
+                  {% set p = [[(target_time - beginning) / (duration_seconds | float), 0] | max, 1] | min %}
                   {% set low = [low_brightness | float, high_brightness | float] | min %}
                   {% set level = low + ((high_brightness | float) - low) * (p ** 2) %}
                   {% set kelvin = 1000000 / ((1000000 / (warm | float)) + ((1000000 / (daylight | float)) - (1000000 / (warm | float))) * p) %}
                   {% set payload = dict(brightness_pct=level | round(0) | int) %}
                   {% if can_fade %}
-                    {% set payload = dict(payload, transition=fade_seconds) %}
+                    {% set payload = dict(payload, transition=remaining) %}
                   {% endif %}
                   {% if 'color_temp' in (state_attr(repeat.item, 'supported_color_modes') or []) %}
                     {% set lower = state_attr(repeat.item, 'min_color_temp_kelvin') | float(warm) %}
@@ -366,7 +368,8 @@ actions:
                   {{ payload }}
         - wait_template: "{{ expand(members) | selectattr('state', 'eq', 'on') | list | length != members | length }}"
           timeout:
-            seconds: "{{ fade_seconds }}"
+            # Recalculate after commands, including a zero wait if they overran.
+            seconds: "{{ [step_deadline - as_timestamp(now()), 0] | max }}"
           continue_on_timeout: true
         # Persist cancellation immediately, even if the light is switched back on.
         - if:

@@ -98,6 +98,7 @@ Leave the helper unset to retain normal operation without recovery. If a selecte
 - After the initial light commands, the blueprint waits up to **15 seconds**, or until wake-up time if sooner, for every selected light to report `on`. It continues immediately once all lights are on. If the wait times out, the run stops with a startup timeout reason in the automation trace and skips wake-up actions.
 - If a run starts partway through its window, it begins at the brightness and color temperature appropriate to the elapsed time.
 - Brightness follows a quadratic curve, rising slowly at first and faster toward the end.
+- Each update has an absolute deadline capped at wake-up time. Command latency reduces later lights' transition durations and the remaining wait, instead of adding another full interval. If commands overrun an update, the wait is zero and settings catch up to the current progress. Slow service calls or device responses can still delay final settings and wake-up actions; those actions run after the final light commands complete.
 - Turning any selected light off, or a light becoming unavailable during the ramp, cancels the entire sunrise. Remaining lights keep their current state; cancellation does not turn them off.
 - The automation blocks another start within the same sunrise window, including after cancellation. With recovery enabled, a saved running sunrise may resume within its original window.
 - On successful completion, lights stay on at the final settings, then any configured wake-up actions run. Those actions are skipped after cancellation.
@@ -125,6 +126,7 @@ To check recovery, select a recovery helper, start a sunrise, then reload automa
 | Wrong phone alarm is used | Check the Android sensor's package information and allow list. |
 | Lights flicker or visibly step | Increase starting brightness for flicker. Lights without reported transition support use steps; reduce the update interval for smaller changes. |
 | Color temperature does not change | Check the light's color-temperature support and range. Brightness-only lights skip color changes. |
+| Final settings or wake-up actions arrive late | Inspect light service durations in the automation trace and bulb connectivity. The loop subtracts command time from its waits, but it cannot remove delays from slow service calls or devices. |
 | Wake-up actions do not run | Check whether a selected light was switched off or became unavailable before completion. |
 
 ## Credits

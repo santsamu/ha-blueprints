@@ -64,8 +64,11 @@ class Simulation:
         self.last_triggered = START + 1 if record is not None else None
         self.events = []
         self.turn_on_delays = {}
+        self.command_latencies = {}
         self.calls = []
+        self.call_times = []
         self.light_calls = []
+        self.wait_calls = []
         self.reason = None
         self.after_wait = lambda completed: None
         self.env = Environment(undefined=StrictUndefined)
@@ -117,17 +120,29 @@ class Simulation:
         self.prepare()
         return self.matches(BLUEPRINT["conditions"])
 
+    def advance(self, seconds):
+        deadline = self.time + timedelta(seconds=seconds)
+        while self.events and self.events[0][0] <= deadline:
+            event_time, entity, state = self.events.pop(0)
+            self.time = max(self.time, event_time)
+            self.states[entity] = state
+        self.time = deadline
+
     def wait(self, step):
+        started = self.time.timestamp()
         timeout = float(self.render(step["timeout"]["seconds"]))
+        assert timeout >= 0
         deadline = self.time + timedelta(seconds=timeout)
         completed = bool(self.render(step["wait_template"]))
         while not completed and self.events and self.events[0][0] <= deadline:
-            self.time, entity, state = self.events.pop(0)
+            event_time, entity, state = self.events.pop(0)
+            self.time = max(self.time, event_time)
             self.states[entity] = state
             completed = bool(self.render(step["wait_template"]))
         if not completed:
             self.time = deadline
         self.context["wait"] = SimpleNamespace(completed=completed)
+        self.wait_calls.append((started, timeout, self.time.timestamp()))
         self.after_wait(completed)
 
     def execute_nested(self, steps):
@@ -172,6 +187,7 @@ class Simulation:
             elif "action" in step:
                 action = step["action"]
                 self.calls.append(action)
+                self.call_times.append((action, self.time.timestamp()))
                 if action == "input_text.set_value":
                     value = self.render(step["data"]["value"], text=True)
                     assert len(value) <= 255
@@ -186,6 +202,7 @@ class Simulation:
                         self.events.sort()
                     else:
                         self.states[entity] = "on"
+                    self.advance(self.command_latencies.get(entity, 0))
             else:
                 raise AssertionError(f"Unsupported step: {step}")
 
