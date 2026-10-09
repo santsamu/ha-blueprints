@@ -55,6 +55,8 @@ class Simulation:
         self.inputs.update(lights=LIGHTS, recovery_helper=HELPER if helper else "",
                            after_sunrise=[{"action": "test.wake_up"}], **inputs)
         self.states = {entity: light_state for entity in LIGHTS}
+        self.attributes = {entity: {"supported_color_modes": ["brightness"],
+                                   "supported_features": 32} for entity in LIGHTS}
         self.states[HELPER] = (
             f"{record['status']}|{record['beginning']}|{record['finish']}"
             if record is not None else ""
@@ -63,10 +65,12 @@ class Simulation:
         self.events = []
         self.turn_on_delays = {}
         self.calls = []
+        self.light_calls = []
         self.reason = None
         self.after_wait = lambda completed: None
         self.env = Environment(undefined=StrictUndefined)
         self.env.filters.update(
+            bitwise_and=lambda value, mask: int(value) & mask,
             timestamp_custom=lambda ts, fmt, local: datetime.fromtimestamp(
                 float(ts), timezone.utc).strftime(fmt),
         )
@@ -80,8 +84,7 @@ class Simulation:
             expand=lambda entities: [SimpleNamespace(entity_id=entity,
                 state=self.states.get(entity, "unknown")) for entity in sorted(set(entities))],
             is_state=lambda entity, state: self.states.get(entity) == state,
-            state_attr=lambda entity, attr: ["brightness"]
-                if attr == "supported_color_modes" else None,
+            state_attr=lambda entity, attr: self.attributes.get(entity, {}).get(attr),
         )
 
     def render(self, value, text=False):
@@ -174,8 +177,9 @@ class Simulation:
                     assert len(value) <= 255
                     self.states[self.render(step["target"]["entity_id"])] = value
                 elif action == "light.turn_on":
-                    self.render(step["data"])
+                    payload = self.render(step["data"])
                     entity = self.render(step["target"]["entity_id"])
+                    self.light_calls.append((self.time.timestamp(), entity, payload))
                     delay = self.turn_on_delays.get(entity, 0)
                     if delay:
                         self.events.append((self.time + timedelta(seconds=delay), entity, "on"))

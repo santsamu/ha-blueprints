@@ -9,7 +9,7 @@ For example, a **07:00 wake-up time** with a **30-minute duration** starts the s
 ## Requirements
 
 - Home Assistant **2024.10.0 or newer**.
-- One or more dimmable lights. Color-temperature support is optional; lights without it receive brightness changes only.
+- One or more lights reporting dimming support through `supported_color_modes`. Color-temperature and transition support are optional.
 - For next-alarm mode, exactly one sensor with the `timestamp` device class whose state contains the alarm date and time, preferably with a time-zone offset.
 
 No helpers or Time & Date integration are required for normal operation. Restart recovery uses an optional dedicated Text helper. Lights that support transitions can fade smoothly between updates.
@@ -56,7 +56,7 @@ Missing, invalid, or expired alarms are skipped. This mode does not fall back to
 
 | Setting | Default | Details |
 | --- | --- | --- |
-| Wake-up lights | Required | Select one or more dimmable light entities. |
+| Wake-up lights | Required | Select one or more dimmable light entities. A selection containing an on/off-only light or missing dimming capabilities stops before any light commands. |
 | Wake-up time source | Manual wake-up time | Choose a fixed daily time or a smartphone next alarm. |
 | Manual wake-up time | `07:00:00` | Finish time in Home Assistant's local time zone; used only in manual mode. |
 | Next alarm sensor | None | Select exactly one timestamp sensor for next-alarm mode; ignored in manual mode. |
@@ -66,9 +66,17 @@ Missing, invalid, or expired alarms are skipped. This mode does not fall back to
 | Final brightness | 100% | 1–100%; brightness at wake-up time. |
 | Starting color temperature | 2000 K | 1500–6500 K; limited to each light's supported range. |
 | Final color temperature | 5500 K | 1500–6500 K; limited to each light's supported range. |
-| Update interval | 15 seconds | 5–60 seconds between light updates; separate from the schedule check interval. |
+| Update interval | 15 seconds | 5–60 seconds between light updates; shorter intervals give smaller steps on lights without transitions. Separate from the schedule check interval. |
 | Restart recovery helper | None | Optional dedicated Text helper storing the original run times and outcome; enables restart/reload recovery. |
 | Actions at wake-up time | None | Optional actions, such as playing music, after successful completion. |
+
+## Light compatibility
+
+Before sending light commands, the blueprint checks that every selected light reports a dimmable color mode. Brightness-only, tunable-white, and RGB lights are supported. On/off-only lights and lights with missing or unknown color modes stop the whole run; the automation trace explains the failure and lists the affected entities in `unsupported_lights`.
+
+Transition support is checked separately for each light using its reported capabilities. Lights supporting transitions fade toward the next update's brightness and color temperature. Other lights step to the settings appropriate to the current elapsed time, with no transition parameter sent. You can mix both types in one automation. Use a shorter update interval to reduce visible steps.
+
+Color-temperature commands are sent only to lights reporting `color_temp` support and are limited to each light's supported Kelvin range. RGB lights without that mode receive brightness changes while keeping their color. The final settings are applied at wake-up time for both fading and stepping lights. See Home Assistant's [light capability documentation](https://developers.home-assistant.io/docs/core/entity/light/#color-modes).
 
 ## Restart and reload recovery
 
@@ -110,11 +118,12 @@ To check recovery, select a recovery helper, start a sunrise, then reload automa
 | Symptom | What to check |
 | --- | --- |
 | Sunrise does not start | Enable the automation, select at least one light, check the wake-up day and time zone, and confirm all selected lights are available. A run already started in this window prevents a scheduled retry. |
+| Trace reports missing dimming support | Inspect `unsupported_lights` in the trace and each entity's `supported_color_modes`. Remove on/off-only lights, or check the integration if a dimmable bulb reports missing or unknown capabilities. |
 | Sunrise stops just after turning lights on | Check the automation trace for a startup timeout. All selected lights must report `on` within 15 seconds of the initial commands completing, or before wake-up time if sooner. Check bulb connectivity and state updates. |
 | Interrupted sunrise does not resume | Check the dedicated recovery helper, its saved running state, the original finish time, and the selected lights. Recovery requires all lights to be available and already on; an off light cancels recovery. |
 | Next-alarm mode does nothing | Select exactly one timestamp sensor and check its state in Home Assistant. It must contain a valid future alarm date and time. |
 | Wrong phone alarm is used | Check the Android sensor's package information and allow list. |
-| Lights flicker or visibly step | Increase starting brightness for flicker. For stepping, check whether the lights support transitions and adjust the update interval. |
+| Lights flicker or visibly step | Increase starting brightness for flicker. Lights without reported transition support use steps; reduce the update interval for smaller changes. |
 | Color temperature does not change | Check the light's color-temperature support and range. Brightness-only lights skip color changes. |
 | Wake-up actions do not run | Check whether a selected light was switched off or became unavailable before completion. |
 

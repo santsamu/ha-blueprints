@@ -9,5 +9,6 @@ python -m unittest discover -s tests -v
 
 The tests parse the actual blueprint and evaluate its Jinja templates and action
 steps with simulated lights, timestamps, helper storage, and state updates. They
-cover restart recovery, cancellation, completion, and startup waits. They do not
+cover restart recovery, cancellation, completion, startup waits, and mixed light
+capabilities, including fading, stepping, and color-temperature limits. They do not
 replace validation in a running Home Assistant instance or testing with real bulbs.

@@ -16,7 +16,10 @@ blueprint:
   input:
     lights:
       name: Wake-up lights
-      description: Select dimmable lights. Tunable-white lights also change color temperature.
+      description: >
+        Select dimmable lights. On/off-only lights or missing dimming capabilities
+        stop the run before any light commands. Tunable-white lights also change
+        color temperature. Lights without transition support use brightness steps.
       selector:
         entity:
           filter:
@@ -120,7 +123,10 @@ blueprint:
           unit_of_measurement: K
     step_seconds:
       name: Update interval
-      description: Lights supporting transitions fade smoothly between updates. Try 10–30 seconds.
+      description: >
+        Lights supporting transitions fade smoothly between updates. Other lights
+        step to the brightness appropriate to the current time. Try 10–30 seconds,
+        or a shorter interval for smaller steps on lights without transitions.
       default: 15
       selector:
         number:
@@ -235,9 +241,33 @@ actions:
       finish: "{{ wake_timestamp | float }}"
       beginning: "{{ start_timestamp | float }}"
       members: "{{ expand(light_ids) | map(attribute='entity_id') | list }}"
+      unsupported_lights: >-
+        {% set ns = namespace(entities=[]) %}
+        {% for entity in members %}
+          {% set modes = state_attr(entity, 'supported_color_modes') or [] %}
+          {% if modes | select('in', ['brightness', 'color_temp', 'hs', 'xy', 'rgb', 'rgbw', 'rgbww', 'white']) | list | length == 0 %}
+            {% set ns.entities = ns.entities + [entity] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.entities }}
       initial_progress: "{{ [[(as_timestamp(now()) - beginning) / (duration_seconds | float), 0] | max, 1] | min }}"
       initial_level: "{{ ([low_brightness | float, high_brightness | float] | min) + ((high_brightness | float) - ([low_brightness | float, high_brightness | float] | min)) * (initial_progress ** 2) }}"
       initial_kelvin: "{{ 1000000 / ((1000000 / (warm | float)) + ((1000000 / (daylight | float)) - (1000000 / (warm | float))) * initial_progress) }}"
+  - alias: Validate dimming support before changing lights
+    if:
+      - condition: template
+        value_template: "{{ members | length == 0 or unsupported_lights | length > 0 }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ recovery_helper != '' }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ recovery_helper }}"
+            data:
+              value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
+      - stop: Sunrise cancelled because no lights were selected or a selected light does not report dimming support. Select dimmable lights; check unsupported_lights in the trace.
   # Never switch an off light back on when recovering an interrupted run.
   - if:
       - condition: template
@@ -265,7 +295,11 @@ actions:
           target:
             entity_id: "{{ repeat.item }}"
           data: >-
-            {% set payload = dict(brightness_pct=initial_level | round(0) | int, transition=0) %}
+            {% set payload = dict(brightness_pct=initial_level | round(0) | int) %}
+            {# LightEntityFeature.TRANSITION = 32. #}
+            {% if (state_attr(repeat.item, 'supported_features') | int(0) | bitwise_and(32)) != 0 %}
+              {% set payload = dict(payload, transition=0) %}
+            {% endif %}
             {% if 'color_temp' in (state_attr(repeat.item, 'supported_color_modes') or []) %}
               {% set lower = state_attr(repeat.item, 'min_color_temp_kelvin') | float(warm) %}
               {% set upper = state_attr(repeat.item, 'max_color_temp_kelvin') | float(daylight) %}
@@ -303,8 +337,7 @@ actions:
         - variables:
             fade_seconds: "{{ [interval | float, [finish - as_timestamp(now()), 0] | max] | min }}"
             progress: "{{ [[(as_timestamp(now()) + fade_seconds - beginning) / (duration_seconds | float), 0] | max, 1] | min }}"
-            level: "{{ ([low_brightness | float, high_brightness | float] | min) + ((high_brightness | float) - ([low_brightness | float, high_brightness | float] | min)) * (progress ** 2) }}"
-            kelvin: "{{ 1000000 / ((1000000 / (warm | float)) + ((1000000 / (daylight | float)) - (1000000 / (warm | float))) * progress) }}"
+            current_progress: "{{ [[(as_timestamp(now()) - beginning) / (duration_seconds | float), 0] | max, 1] | min }}"
         - repeat:
             for_each: "{{ members }}"
             sequence:
@@ -314,7 +347,16 @@ actions:
                 target:
                   entity_id: "{{ repeat.item }}"
                 data: >-
-                  {% set payload = dict(brightness_pct=level | round(0) | int, transition=fade_seconds) %}
+                  {% set can_fade = (state_attr(repeat.item, 'supported_features') | int(0) | bitwise_and(32)) != 0 %}
+                  {# A stepping light must not jump ahead to the next interval's endpoint. #}
+                  {% set p = progress if can_fade else current_progress %}
+                  {% set low = [low_brightness | float, high_brightness | float] | min %}
+                  {% set level = low + ((high_brightness | float) - low) * (p ** 2) %}
+                  {% set kelvin = 1000000 / ((1000000 / (warm | float)) + ((1000000 / (daylight | float)) - (1000000 / (warm | float))) * p) %}
+                  {% set payload = dict(brightness_pct=level | round(0) | int) %}
+                  {% if can_fade %}
+                    {% set payload = dict(payload, transition=fade_seconds) %}
+                  {% endif %}
                   {% if 'color_temp' in (state_attr(repeat.item, 'supported_color_modes') or []) %}
                     {% set lower = state_attr(repeat.item, 'min_color_temp_kelvin') | float(warm) %}
                     {% set upper = state_attr(repeat.item, 'max_color_temp_kelvin') | float(daylight) %}
@@ -364,7 +406,10 @@ actions:
           target:
             entity_id: "{{ repeat.item }}"
           data: >-
-            {% set payload = dict(brightness_pct=high_brightness | int, transition=0) %}
+            {% set payload = dict(brightness_pct=high_brightness | int) %}
+            {% if (state_attr(repeat.item, 'supported_features') | int(0) | bitwise_and(32)) != 0 %}
+              {% set payload = dict(payload, transition=0) %}
+            {% endif %}
             {% if 'color_temp' in (state_attr(repeat.item, 'supported_color_modes') or []) %}
               {% set lower = state_attr(repeat.item, 'min_color_temp_kelvin') | float(warm) %}
               {% set upper = state_attr(repeat.item, 'max_color_temp_kelvin') | float(daylight) %}
