@@ -6,7 +6,7 @@ A collection of automation blueprints for Home Assistant. Each blueprint has its
 
 | Blueprint | Description | Minimum Home Assistant version |
 | --- | --- | --- |
-| [Sunrise Wake-up](sunrise_wake_up/README.md) | Gradually brighten your lights before a fixed wake-up time or your next phone alarm, with an optional warm-white-to-daylight fade. | 2024.10.0 |
+| [Sunrise Wake-up](sunrise_wake_up/README.md) | Gradually brighten your lights before a fixed wake-up time or your next phone alarm, with a white fade or five editable sunrise colors. | 2024.10.0 |
 | [Sonoff Zigbee Button](sonoff_zigbee_button/README.md) | Assign actions to press, double press, and hold on a SONOFF button paired through ZHA. | 2024.10.0 |
 
 ## Getting started
@@ -20,7 +20,7 @@ See the official [Using automation blueprints](https://www.home-assistant.io/doc
 ## Automated checks
 
 See [Blueprint checks](tests/README.md) for local test commands. GitHub Actions
-runs the simulation checks and Sonoff tests using Home Assistant's actual runtime
+runs the simulation checks and Sonoff and sunrise tests using Home Assistant's actual runtime
 on the minimum supported release and a newer pinned release.
 
 ## Repository layout

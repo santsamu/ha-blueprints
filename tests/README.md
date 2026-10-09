@@ -14,6 +14,8 @@ steps with simulated lights, timestamps, helper storage, and state updates. They
 cover restart recovery, cancellation, completion, startup waits, and mixed light
 capabilities, including fading, stepping, and color-temperature limits. Timing
 checks simulate slow light commands, missed update deadlines, and cancellation.
+Color checks cover editable palette checkpoints, interpolation and normalization,
+capability fallbacks, checkpoint deadlines, late commands, and recovery.
 Sonoff checks evaluate the actual blueprint's gesture conditions, including
 empty gestures during restart mode and configured gestures passing the guard.
 They do not replace validation in a running Home Assistant instance or testing
@@ -21,12 +23,17 @@ with real bulbs or buttons.
 
 ## Home Assistant runtime checks
 
-The separate Sonoff suite imports the repository's blueprint into a temporary
-Home Assistant configuration and sends events through the real event bus. It
-checks gesture routing, other devices, unknown commands, empty actions, all four
+The separate runtime suite imports the repository's blueprints into temporary
+Home Assistant configurations. Sonoff tests send events through the real event bus and
+check gesture routing, other devices, unknown commands, empty actions, all four
 automation modes, cancellation, queue and parallel limits, and ignored-press
 warnings. Native event waits keep actions running until the test releases them;
 the script engine and blueprint importer are not simulated.
+
+Sunrise tests use the native light service and recording light entities in place
+of hardware. They verify blueprint import, RGB conversion to each supported color
+format, temperature and brightness fallbacks, the default white style, and
+rejection of black palettes before commands.
 
 Run on Linux with Python 3.12 for the minimum supported Home Assistant release:
 
@@ -47,7 +54,8 @@ two discovery commands above to include both suites locally.
 
 No Zigbee coordinator, paired button, helpers, or live Home Assistant installation
 is needed. These tests verify automation behavior after a ZHA event arrives;
-physical gesture detection still needs checking with your button.
+physical gesture detection and the appearance of colors and fades still need
+checking with your hardware.
 
 ## Run with Docker
 
@@ -55,7 +63,7 @@ Start Docker Desktop with **Linux containers** enabled, then open **PowerShell**
 in the repository root. No local Python installation is required. Docker needs
 internet access to download the Python images and test dependencies.
 
-Run the simulation checks and Sonoff runtime tests on Home Assistant **2024.10.0**:
+Run the simulation checks and all runtime tests on Home Assistant **2024.10.0**:
 
 ```powershell
 $repoPath = (Get-Location).Path
@@ -67,7 +75,7 @@ docker run --rm `
   python:3.12-slim sh -c 'python -m pip install -q -r tests/requirements.txt -r tests/runtime/requirements-2024.10.0.txt && python -m unittest discover -s tests -v && python -m unittest discover -s tests/runtime -v'
 ```
 
-In the same PowerShell session, also run the Sonoff runtime tests on
+In the same PowerShell session, also run all runtime tests on
 Home Assistant **2026.10.0**:
 
 ```powershell
@@ -78,8 +86,8 @@ docker run --rm `
   python:3.14-slim sh -c 'python -m pip install -q -r tests/runtime/requirements-2026.10.0.txt && python -m unittest discover -s tests/runtime -v'
 ```
 
-Successful suites finish with `OK`: currently **48 simulation checks** and
-**11 runtime tests per Home Assistant version**. If installation or a test suite
+Successful suites finish with `OK`: currently **62 simulation checks** and
+**15 runtime tests per Home Assistant version**. If installation or a test suite
 fails, the command exits with a nonzero code; check `$LASTEXITCODE` immediately
 after the Docker command.
 

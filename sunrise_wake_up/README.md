@@ -1,6 +1,6 @@
 # Sunrise Wake-up
 
-Simulate a gentle sunrise that finishes at your wake-up time. Brightness rises slowly at first, and tunable-white lights fade from warm white toward daylight. Choose a daily manual time or a timestamp sensor containing your next alarm.
+Simulate a gentle sunrise that finishes at your wake-up time. Brightness rises slowly at first. Choose a warm-white-to-daylight fade or a colorful sunrise with five editable colors, and schedule it using a daily manual time or a timestamp sensor containing your next alarm.
 
 For example, a **07:00 wake-up time** with a **30-minute duration** starts the sunrise at approximately **06:30** and reaches the final light settings at **07:00**.
 
@@ -71,25 +71,66 @@ The start is included and the end is excluded: an alarm at 09:00 is ignored, whi
 | Wake-up days | Every day | Applies to the day of the wake-up time, even if the sunrise starts the previous evening. |
 | Starting brightness | 1% | 1–100%; limited to the final brightness if set higher. Raise this if bulbs flicker at low brightness. |
 | Final brightness | 100% | 1–100%; brightness at wake-up time. |
+| Sunrise style | White sunrise | Existing temperature fade, or Colorful sunrise using the editable palette on color-capable lights. |
+| Sunrise color at 0% | Blue/purple `[64, 32, 255]` | Starting color; used only in Colorful sunrise. |
+| Sunrise color at 25% | Pink `[255, 64, 128]` | Color one quarter through the duration. |
+| Sunrise color at 50% | Orange `[255, 128, 0]` | Color halfway through the duration. |
+| Sunrise color at 75% | Warm white `[255, 214, 170]` | Color three quarters through the duration. |
+| Sunrise color at 100% | Daylight-like white `[220, 235, 255]` | Final color; overrides Final color temperature for color-capable lights in Colorful sunrise. |
 | Starting color temperature | 2000 K | 1500–6500 K; limited to each light's supported range. |
 | Final color temperature | 5500 K | 1500–6500 K; limited to each light's supported range. |
 | Update interval | 15 seconds | 5–60 seconds between light updates; shorter intervals give smaller steps on lights without transitions. Separate from the schedule check interval. |
 | Restart recovery helper | None | Optional dedicated Text helper storing the original run times and outcome; enables restart/reload recovery. |
 | Actions at wake-up time | None | Optional actions, such as playing music, after successful completion. |
 
+## Sunrise styles and editable colors
+
+**White sunrise** is the default and preserves the existing behavior: tunable-white
+lights fade from the starting to the final color temperature, while RGB lights
+without temperature support keep their previous color as brightness increases.
+
+Choose **Colorful sunrise** to blend through five colors on color-capable lights.
+Each checkpoint has a color picker in the automation options, so you can replace
+any default without editing YAML. Positions are fixed at **0%, 25%, 50%, 75%, and
+100% of elapsed time**. With a 30-minute sunrise, the colors occur at the start,
+7 minutes 30 seconds, 15 minutes, 22 minutes 30 seconds, and wake-up time.
+All selected color lights share the same palette and show one color at a time.
+This approximates a sunrise appearance; it does not reproduce Hue's proprietary
+effect or control multiple gradient segments independently.
+
+Colors blend between neighboring checkpoints using RGB channels. Their intensity
+is normalized so the brightest channel is 255, including between checkpoints;
+the **Starting brightness** and **Final brightness** settings control dimming
+separately. For example, selecting `[10, 20, 40]` produces the same tint as
+`[64, 128, 255]`. Choose non-black colors: an invalid or entirely black checkpoint
+stops a Colorful sunrise before any light commands, with a reason in the trace.
+Unused palette values do not affect White sunrise.
+
+The 100% color can be any color and is applied at the final brightness. On
+color-capable lights in Colorful sunrise, it takes precedence over the Kelvin
+settings. White-only tunable lights still use the original temperature fade and
+per-light limits, and brightness-only lights still dim. Exact colors and apparent
+brightness depend on the bulb's color range and hardware.
+
 ## Light compatibility
 
 Before sending light commands, the blueprint checks that every selected light reports a dimmable color mode. Brightness-only, tunable-white, and RGB lights are supported. On/off-only lights and lights with missing or unknown color modes stop the whole run; the automation trace explains the failure and lists the affected entities in `unsupported_lights`.
 
-Transition support is checked separately for each light using its reported capabilities. Lights supporting transitions fade toward the next update's brightness and color temperature. Other lights step to the settings appropriate to the current elapsed time, with no transition parameter sent. You can mix both types in one automation. Use a shorter update interval to reduce visible steps.
+Transition support is checked separately for each light using its reported capabilities. Lights supporting transitions fade toward the next update's brightness and color. Other lights step to the settings appropriate to the current elapsed time, with no transition parameter sent. You can mix both types in one automation. Use a shorter update interval to reduce visible steps. When Colorful sunrise includes a color-capable light, update deadlines also stop at palette checkpoints so a fade does not skip a color boundary. Slow commands can still miss a checkpoint; later updates catch up to the current progress.
 
-Color-temperature commands are sent only to lights reporting `color_temp` support and are limited to each light's supported Kelvin range. RGB lights without that mode receive brightness changes while keeping their color. The final settings are applied at wake-up time for both fading and stepping lights. See Home Assistant's [light capability documentation](https://developers.home-assistant.io/docs/core/entity/light/#color-modes).
+Color-temperature commands are sent only to lights reporting `color_temp` support and are limited to each light's supported Kelvin range. In Colorful sunrise, lights reporting `hs`, `xy`, `rgb`, `rgbw`, or `rgbww` receive the palette instead; Home Assistant converts RGB commands to their native color format. Each command contains either RGB color or color temperature. The final settings are applied at wake-up time for both fading and stepping lights. See Home Assistant's [light capability documentation](https://developers.home-assistant.io/docs/core/entity/light/#color-modes).
 
 ## Restart and reload recovery
 
 To enable recovery, create a **Text** helper under **Settings > Devices & services > Helpers**, set its maximum length to **255**, and select it in **Restart recovery helper**. Use a separate helper for each automation. Leave its contents under the blueprint's control; if configured in YAML, omit `initial` so its saved state is restored. See the official [Text helper documentation](https://www.home-assistant.io/integrations/input_text/#restore-state).
 
 The blueprint saves the original start and finish times and whether the run is running, cancelled, or completed. Following a Home Assistant restart or automation reload, a saved running sunrise can resume at the progress appropriate to the current time, even if the phone alarm was changed or cleared. The original duration and finish time are retained. Recovery is checked at Home Assistant startup and on the usual 15-second schedule checks.
+
+Colorful sunrise also resumes at the color appropriate to that progress. The
+recovery record format is unchanged. Style and palette values come from the
+currently saved automation options, just like brightness and temperature settings;
+changing those options before recovery can change the resumed appearance. Colors
+are calculated from elapsed time, so recovery does not replay earlier checkpoints.
 
 Recovery requires the saved wake-up time to still be in the future, the wake-up day to be allowed, and all selected lights to be available and already on. If any light reports `off`, the saved run is marked cancelled without switching it back on. Unavailable lights defer recovery until their states are known; the run expires at its original wake-up time. Cancelled and completed runs are not resumed.
 
@@ -103,7 +144,7 @@ Leave the helper unset to retain normal operation without recovery. If a selecte
 - A run can start only during the sunrise window, before the wake-up time, with the selected lights reporting `on` or `off`.
 - Lights already on are adjusted too. The blueprint does not require them to be off before starting.
 - After the initial light commands, the blueprint waits up to **15 seconds**, or until wake-up time if sooner, for every selected light to report `on`. It continues immediately once all lights are on. If the wait times out, the run stops with a startup timeout reason in the automation trace and skips wake-up actions.
-- If a run starts partway through its window, it begins at the brightness and color temperature appropriate to the elapsed time.
+- If a run starts partway through its window, it begins at the brightness and color appropriate to the elapsed time.
 - Brightness follows a quadratic curve, rising slowly at first and faster toward the end.
 - Each update has an absolute deadline capped at wake-up time. Command latency reduces later lights' transition durations and the remaining wait, instead of adding another full interval. If commands overrun an update, the wait is zero and settings catch up to the current progress. Slow service calls or device responses can still delay final settings and wake-up actions; those actions run after the final light commands complete.
 - Turning any selected light off, or a light becoming unavailable during the ramp, cancels the entire sunrise. Remaining lights keep their current state; cancellation does not turn them off.
@@ -118,6 +159,17 @@ Leave the helper unset to retain normal operation without recovery. If a selecte
 4. To check cancellation, turn one selected light off during the ramp. Use a later wake-up window for another test.
 
 The automation's **Run actions** control still checks whether the current time is inside the sunrise window, so running it outside that window will not start the lights.
+
+For a physical color test, select a color-capable bulb and **Colorful sunrise**,
+then use the five-minute test above. The default colors should progress through
+blue/purple, pink, orange, warm white, and daylight-like white. Replace the 100%
+color with an obvious color to check that it overrides the Kelvin setting and
+remains on at completion. Add a tunable-white or brightness-only light to check
+the fallback behavior. Turning any selected light off during the ramp should
+still cancel the whole sunrise and skip wake-up actions.
+
+The [automated checks](../tests/README.md) cover palette interpolation, timing,
+recovery, cancellation, and native Home Assistant light-command conversion.
 
 To check recovery, select a recovery helper, start a sunrise, then reload automations while the lights stay on. It should resume within about 15 seconds with the original finish time. Repeat with a new window, cancel by switching a light off, and reload; that cancelled run should stay stopped.
 
