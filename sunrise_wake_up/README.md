@@ -42,7 +42,9 @@ Choose **Manual wake-up time** and set the time at which the sunrise should fini
 
 ### Smartphone next alarm
 
-Choose **Smartphone next alarm** and select **exactly one** next-alarm sensor. Although the input allows multiple selections, the blueprint skips the run unless exactly one sensor is selected.
+Choose **Smartphone next alarm** and select a next-alarm sensor. The input accepts a single sensor and is required for this mode. Leave it empty when using manual mode.
+
+Existing automations saved with the previous one-item sensor list remain supported. If an existing automation has multiple alarm sensors selected, edit it and select just one.
 
 On Android, enable the Companion App's **Next Alarm** sensor and select its entity in the automation. Android can report alarms scheduled by different apps; the sensor's package allow list can help filter these. See the official [Next alarm sensor documentation](https://companion.home-assistant.io/docs/core/sensors/#next-alarm-sensor).
 

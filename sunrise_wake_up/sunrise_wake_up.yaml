@@ -39,18 +39,19 @@ blueprint:
     next_alarm_sensor:
       name: Next alarm sensor
       description: >
-        Used only in next-alarm mode. Select a sensor whose state contains the
-        alarm date and time, preferably with a time-zone offset. Android provides
+        Required in next-alarm mode; leave empty in manual mode. Select one
+        sensor whose state contains the alarm date and time, preferably with a
+        time-zone offset. Android provides
         this through the Companion App's Next Alarm sensor. iPhone needs a
         separately supplied timestamp sensor. Missing or invalid alarms are
         skipped; there is no fallback to the manual time.
-      default: []
+      default: ""
       selector:
         entity:
           filter:
             - domain: sensor
               device_class: timestamp
-          multiple: true
+          multiple: false
     sunrise_duration:
       name: Sunrise duration
       description: Minutes BEFORE the wake-up time. For 07:00 and 30 minutes, sunrise starts at 06:30.
@@ -143,7 +144,7 @@ variables:
   light_ids: !input lights
   source: !input time_source
   manual_time: !input wake_up_time
-  alarm_sensors: !input next_alarm_sensor
+  alarm_sensor: !input next_alarm_sensor
   minutes: !input sunrise_duration
   allowed_days: !input weekdays
   low_brightness: !input initial_brightness
@@ -154,7 +155,10 @@ variables:
   duration_seconds: "{{ (minutes | float) * 60 }}"
   wake_timestamp: >-
     {% if source == 'next_alarm' %}
-      {{ as_timestamp(states(alarm_sensors[0]), 0) if alarm_sensors | length == 1 else 0 }}
+      {# Keep existing automations with a legacy one-item selection working. #}
+      {% set sensor = alarm_sensor if alarm_sensor is string else
+         (alarm_sensor[0] if alarm_sensor is sequence and alarm_sensor | length == 1 else '') %}
+      {{ as_timestamp(states(sensor), 0) if sensor else 0 }}
     {% else %}
       {% set wake = today_at(manual_time) %}
       {% if wake <= now() %}{% set wake = wake + timedelta(days=1) %}{% endif %}
