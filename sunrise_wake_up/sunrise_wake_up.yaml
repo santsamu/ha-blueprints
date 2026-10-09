@@ -214,9 +214,17 @@ actions:
               {% set payload = dict(payload, color_temp_kelvin=k | round(0) | int) %}
             {% endif %}
             {{ payload }}
-  # Allow state reports from bulbs to arrive before monitoring cancellation.
-  - delay:
-      seconds: 2
+  # Wait for state reports from slow bulbs without extending the wake-up deadline.
+  - alias: Wait for all wake-up lights to report on
+    wait_template: "{{ expand(members) | selectattr('state', 'eq', 'on') | list | length == members | length }}"
+    timeout:
+      seconds: "{{ [15, [finish - as_timestamp(now()), 0] | max] | min }}"
+    continue_on_timeout: true
+  - if:
+      - condition: template
+        value_template: "{{ not wait.completed }}"
+    then:
+      - stop: Sunrise cancelled because wake-up lights did not all report on before the startup timeout or wake-up time.
   - repeat:
       while:
         - condition: template

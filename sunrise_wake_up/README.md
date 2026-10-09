@@ -74,6 +74,7 @@ Missing, invalid, or expired alarms are skipped. This mode does not fall back to
 - The schedule is checked every **15 seconds**, so the start can occur shortly after the calculated start time.
 - A run can start only during the sunrise window, before the wake-up time, with the selected lights reporting `on` or `off`.
 - Lights already on are adjusted too. The blueprint does not require them to be off before starting.
+- After the initial light commands, the blueprint waits up to **15 seconds**, or until wake-up time if sooner, for every selected light to report `on`. It continues immediately once all lights are on. If the wait times out, the run stops with a startup timeout reason in the automation trace and skips wake-up actions.
 - If a run starts partway through its window, it begins at the brightness and color temperature appropriate to the elapsed time.
 - Brightness follows a quadratic curve, rising slowly at first and faster toward the end.
 - Turning any selected light off, or a light becoming unavailable during the ramp, cancels the entire sunrise. Remaining lights keep their current state; cancellation does not turn them off.
@@ -94,6 +95,7 @@ The automation's **Run actions** control still checks whether the current time i
 | Symptom | What to check |
 | --- | --- |
 | Sunrise does not start | Enable the automation, select at least one light, check the wake-up day and time zone, and confirm all selected lights are available. A run already started in this window prevents a scheduled retry. |
+| Sunrise stops just after turning lights on | Check the automation trace for a startup timeout. All selected lights must report `on` within 15 seconds of the initial commands completing, or before wake-up time if sooner. Check bulb connectivity and state updates. |
 | Next-alarm mode does nothing | Select exactly one timestamp sensor and check its state in Home Assistant. It must contain a valid future alarm date and time. |
 | Wrong phone alarm is used | Check the Android sensor's package information and allow list. |
 | Lights flicker or visibly step | Increase starting brightness for flicker. For stepping, check whether the lights support transitions and adjust the update interval. |
