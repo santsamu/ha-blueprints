@@ -66,6 +66,11 @@ Hold runs its configured sequence once for each matching hold event. It does not
 
 ## Verify and troubleshoot
 
+The [automated checks](../tests/README.md) include Home Assistant runtime tests
+for gesture routing, overlapping actions, empty gestures, run limits, and
+warning logs. They run against the minimum supported release and a newer pinned
+release in GitHub Actions.
+
 Test all three gestures using short actions you can observe, such as changing a light. Use the automation trace to check which gesture triggered and which actions ran.
 
 If nothing happens, open **Developer tools > Events**, listen to `zha_event`, and operate the button. Confirm that the event's `device_id` matches the selected button and its `command` is `toggle` for press, `on` for double press, or `off` for hold. These are the mappings used by the supplied reference; actual device events should be checked on your installation.

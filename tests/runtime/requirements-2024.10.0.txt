@@ -1,0 +1,3 @@
+homeassistant==2024.10.0
+# This release's ACME library still uses ComparableX509, removed in josepy 2.
+josepy==1.14.0

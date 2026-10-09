@@ -17,6 +17,12 @@ A collection of automation blueprints for Home Assistant. Each blueprint has its
 
 See the official [Using automation blueprints](https://www.home-assistant.io/docs/automation/using_blueprints/) guide for import and automation creation instructions.
 
+## Automated checks
+
+See [Blueprint checks](tests/README.md) for local test commands. GitHub Actions
+runs the simulation checks and Sonoff tests using Home Assistant's actual runtime
+on the minimum supported release and a newer pinned release.
+
 ## Repository layout
 
 ```text
