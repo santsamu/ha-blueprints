@@ -30,6 +30,10 @@ blueprints/automation/ha-blueprints/sonoff_zigbee_button.yaml
 
 Create an automation from the blueprint, select your button, configure the actions you want, and save and enable the automation. Leave unused gesture actions empty.
 
+An empty gesture is rejected before the automation starts its action sequence. For example, with `restart` mode, holding the button while a press action is running leaves that action running if **Hold Action** is empty. Configured gestures still follow the selected automation mode. Empty gestures also do not occupy queued or parallel runs.
+
+The matching gesture's action list is exposed as a trigger variable so the condition can check whether it is empty. Home Assistant evaluates templates in that variable before starting the action sequence. If your actions contain templates that depend on variables created later in the sequence, put those actions in a separate script and configure the gesture to call that script.
+
 ## Settings
 
 | Setting | Default | Details |

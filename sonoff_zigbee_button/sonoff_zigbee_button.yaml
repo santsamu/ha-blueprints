@@ -3,7 +3,7 @@ blueprint:
   description: >-
     Assign actions to press, double press, and hold on a SONOFF Zigbee button
     paired through ZHA. Supports devices reported as eWeLink WB01 or SNZB-01P.
-    Leave an action empty to do nothing for that gesture. Choose how additional
+    Empty gestures are ignored without interrupting running actions. Choose how additional
     button presses are handled while an action sequence is still running.
   domain: automation
   homeassistant:
@@ -67,18 +67,33 @@ triggers:
       device_id: !input button_id
       command: "toggle"
     id: press
+    variables:
+      selected_action_sequence: !input press_action
   - trigger: event
     event_type: zha_event
     event_data:
       device_id: !input button_id
       command: "on"
     id: double_press
+    variables:
+      selected_action_sequence: !input double_press_action
   - trigger: event
     event_type: zha_event
     event_data:
       device_id: !input button_id
       command: "off"
     id: hold
+    variables:
+      selected_action_sequence: !input hold_action
+
+# Automation conditions are checked before the action script applies its mode.
+# Checking inside actions would be too late to protect a running restart sequence.
+conditions:
+  - alias: Ignore gestures without configured actions
+    condition: template
+    value_template: >-
+      {{ selected_action_sequence is defined and
+         selected_action_sequence | length > 0 }}
 
 actions:
   - choose:
