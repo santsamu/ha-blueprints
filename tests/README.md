@@ -48,3 +48,43 @@ two discovery commands above to include both suites locally.
 No Zigbee coordinator, paired button, helpers, or live Home Assistant installation
 is needed. These tests verify automation behavior after a ZHA event arrives;
 physical gesture detection still needs checking with your button.
+
+## Run with Docker
+
+Start Docker Desktop with **Linux containers** enabled, then open **PowerShell**
+in the repository root. No local Python installation is required. Docker needs
+internet access to download the Python images and test dependencies.
+
+Run the simulation checks and Sonoff runtime tests on Home Assistant **2024.10.0**:
+
+```powershell
+$repoPath = (Get-Location).Path
+
+docker run --rm `
+  --mount "type=bind,source=$repoPath,target=/workspace,readonly" `
+  --workdir /workspace `
+  --env PYTHONDONTWRITEBYTECODE=1 `
+  python:3.12-slim sh -c 'python -m pip install -q -r tests/requirements.txt -r tests/runtime/requirements-2024.10.0.txt && python -m unittest discover -s tests -v && python -m unittest discover -s tests/runtime -v'
+```
+
+In the same PowerShell session, also run the Sonoff runtime tests on
+Home Assistant **2026.10.0**:
+
+```powershell
+docker run --rm `
+  --mount "type=bind,source=$repoPath,target=/workspace,readonly" `
+  --workdir /workspace `
+  --env PYTHONDONTWRITEBYTECODE=1 `
+  python:3.14-slim sh -c 'python -m pip install -q -r tests/runtime/requirements-2026.10.0.txt && python -m unittest discover -s tests/runtime -v'
+```
+
+Successful suites finish with `OK`: currently **48 simulation checks** and
+**11 runtime tests per Home Assistant version**. If installation or a test suite
+fails, the command exits with a nonzero code; check `$LASTEXITCODE` immediately
+after the Docker command.
+
+The repository is mounted read-only, and `PYTHONDONTWRITEBYTECODE=1` prevents
+Python from attempting to write bytecode there. Home Assistant uses a temporary
+configuration inside the container. No ports or Zigbee hardware need to be
+exposed. Docker removes each container after it exits because of `--rm`.
+Images remain cached, but Python dependencies install again for each run.
