@@ -12,7 +12,7 @@ For example, a **07:00 wake-up time** with a **30-minute duration** starts the s
 - One or more dimmable lights. Color-temperature support is optional; lights without it receive brightness changes only.
 - For next-alarm mode, exactly one sensor with the `timestamp` device class whose state contains the alarm date and time, preferably with a time-zone offset.
 
-No helpers or Time & Date integration are required. Lights that support transitions can fade smoothly between updates.
+No helpers or Time & Date integration are required for normal operation. Restart recovery uses an optional dedicated Text helper. Lights that support transitions can fade smoothly between updates.
 
 ## Installation
 
@@ -67,7 +67,20 @@ Missing, invalid, or expired alarms are skipped. This mode does not fall back to
 | Starting color temperature | 2000 K | 1500–6500 K; limited to each light's supported range. |
 | Final color temperature | 5500 K | 1500–6500 K; limited to each light's supported range. |
 | Update interval | 15 seconds | 5–60 seconds between light updates; separate from the schedule check interval. |
+| Restart recovery helper | None | Optional dedicated Text helper storing the original run times and outcome; enables restart/reload recovery. |
 | Actions at wake-up time | None | Optional actions, such as playing music, after successful completion. |
+
+## Restart and reload recovery
+
+To enable recovery, create a **Text** helper under **Settings > Devices & services > Helpers**, set its maximum length to **255**, and select it in **Restart recovery helper**. Use a separate helper for each automation. Leave its contents under the blueprint's control; if configured in YAML, omit `initial` so its saved state is restored. See the official [Text helper documentation](https://www.home-assistant.io/integrations/input_text/#restore-state).
+
+The blueprint saves the original start and finish times and whether the run is running, cancelled, or completed. Following a Home Assistant restart or automation reload, a saved running sunrise can resume at the progress appropriate to the current time, even if the phone alarm was changed or cleared. The original duration and finish time are retained. Recovery is checked at Home Assistant startup and on the usual 15-second schedule checks.
+
+Recovery requires the saved wake-up time to still be in the future, the wake-up day to be allowed, and all selected lights to be available and already on. If any light reports `off`, the saved run is marked cancelled without switching it back on. Unavailable lights defer recovery until their states are known; the run expires at its original wake-up time. Cancelled and completed runs are not resumed.
+
+The helper is marked completed before optional wake-up actions run. Those actions are not replayed after an interruption, so a restart during them can leave them unfinished. Recovery cannot observe a light being switched off and back on while Home Assistant is down. State restoration depends on Home Assistant saving the helper's latest state; an abrupt power loss can lose recent updates.
+
+Leave the helper unset to retain normal operation without recovery. If a selected helper is unavailable, the automation waits for it rather than starting without saved state.
 
 ## Behavior and cancellation
 
@@ -78,7 +91,7 @@ Missing, invalid, or expired alarms are skipped. This mode does not fall back to
 - If a run starts partway through its window, it begins at the brightness and color temperature appropriate to the elapsed time.
 - Brightness follows a quadratic curve, rising slowly at first and faster toward the end.
 - Turning any selected light off, or a light becoming unavailable during the ramp, cancels the entire sunrise. Remaining lights keep their current state; cancellation does not turn them off.
-- The automation blocks another start within the same sunrise window, including after cancellation.
+- The automation blocks another start within the same sunrise window, including after cancellation. With recovery enabled, a saved running sunrise may resume within its original window.
 - On successful completion, lights stay on at the final settings, then any configured wake-up actions run. Those actions are skipped after cancellation.
 
 ## Try it out
@@ -90,12 +103,15 @@ Missing, invalid, or expired alarms are skipped. This mode does not fall back to
 
 The automation's **Run actions** control still checks whether the current time is inside the sunrise window, so running it outside that window will not start the lights.
 
+To check recovery, select a recovery helper, start a sunrise, then reload automations while the lights stay on. It should resume within about 15 seconds with the original finish time. Repeat with a new window, cancel by switching a light off, and reload; that cancelled run should stay stopped.
+
 ## Troubleshooting
 
 | Symptom | What to check |
 | --- | --- |
 | Sunrise does not start | Enable the automation, select at least one light, check the wake-up day and time zone, and confirm all selected lights are available. A run already started in this window prevents a scheduled retry. |
 | Sunrise stops just after turning lights on | Check the automation trace for a startup timeout. All selected lights must report `on` within 15 seconds of the initial commands completing, or before wake-up time if sooner. Check bulb connectivity and state updates. |
+| Interrupted sunrise does not resume | Check the dedicated recovery helper, its saved running state, the original finish time, and the selected lights. Recovery requires all lights to be available and already on; an off light cancels recovery. |
 | Next-alarm mode does nothing | Select exactly one timestamp sensor and check its state in Home Assistant. It must contain a valid future alarm date and time. |
 | Wrong phone alarm is used | Check the Android sensor's package information and allow list. |
 | Lights flicker or visibly step | Increase starting brightness for flicker. For stepping, check whether the lights support transitions and adjust the update interval. |

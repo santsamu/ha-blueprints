@@ -4,10 +4,12 @@ blueprint:
     A gentle simulated sunrise that FINISHES at your wake-up time. Choose a
     daily manual time or a timestamp sensor such as Android's Next Alarm.
     Brightness rises slowly at first, while tunable-white lights move from
-    warm white toward daylight. No Time & Date integration or helpers required.
+    warm white toward daylight. No Time & Date integration required. Helpers are
+    optional; select a dedicated Text helper to enable restart/reload recovery.
     Checks the schedule every 15 seconds. Turning any selected light off during
     the ramp cancels the entire sunrise. The finish time is captured when the
     run starts; subsequent phone-alarm changes do not move an active sunrise.
+    Recovery resumes only before that deadline and while all lights remain on.
   domain: automation
   homeassistant:
     min_version: "2024.10.0"
@@ -126,6 +128,21 @@ blueprint:
           max: 60
           step: 1
           unit_of_measurement: s
+    recovery_helper:
+      name: Restart recovery helper
+      description: >
+        Optional. Select a dedicated Text helper (input_text) with maximum length
+        255 and no initial value. Do not share it with another automation or edit
+        its contents. Stores the run's original times and outcome so a restart or
+        automation reload can resume an interrupted sunrise if every light is
+        still on. Cancelled and completed runs are not resumed. Leave empty to
+        keep the helper-free behavior.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+          multiple: false
     after_sunrise:
       name: Actions at wake-up time
       description: Optional actions after successful completion, such as playing music. Not run after cancellation.
@@ -139,6 +156,8 @@ max_exceeded: silent
 triggers:
   - trigger: time_pattern
     seconds: "/15"
+  - trigger: homeassistant
+    event: start
 
 variables:
   light_ids: !input lights
@@ -152,8 +171,19 @@ variables:
   warm: !input warm_kelvin
   daylight: !input daylight_kelvin
   interval: !input step_seconds
-  duration_seconds: "{{ (minutes | float) * 60 }}"
-  wake_timestamp: >-
+  recovery_helper: !input recovery_helper
+  # Text format avoids newer from_json(default) support; keep HA 2024.10 compatibility.
+  recovery_fields: "{{ states(recovery_helper).split('|') if recovery_helper else [] }}"
+  recovery_record: >-
+    {{ dict(status=recovery_fields[0], beginning=recovery_fields[1], finish=recovery_fields[2])
+       if recovery_fields | length == 3 else {} }}
+  saved_beginning: "{{ recovery_record.get('beginning', 0) | float(0) }}"
+  saved_finish: "{{ recovery_record.get('finish', 0) | float(0) }}"
+  recovery_pending: >-
+    {{ recovery_helper != '' and recovery_record.get('status') == 'running'
+       and saved_beginning > 0 and 300 <= saved_finish - saved_beginning <= 7200
+       and saved_beginning <= as_timestamp(now()) < saved_finish }}
+  scheduled_wake_timestamp: >-
     {% if source == 'next_alarm' %}
       {# Keep existing automations with a legacy one-item selection working. #}
       {% set sensor = alarm_sensor if alarm_sensor is string else
@@ -164,9 +194,15 @@ variables:
       {% if wake <= now() %}{% set wake = wake + timedelta(days=1) %}{% endif %}
       {{ as_timestamp(wake) }}
     {% endif %}
+  wake_timestamp: "{{ saved_finish if recovery_pending else scheduled_wake_timestamp | float }}"
+  duration_seconds: "{{ saved_finish - saved_beginning if recovery_pending else (minutes | float) * 60 }}"
   start_timestamp: "{{ (wake_timestamp | float) - (duration_seconds | float) }}"
 
 conditions:
+  # Wait for the helper to restore before considering a start or recovery.
+  - condition: template
+    value_template: >-
+      {{ not recovery_helper or states(recovery_helper) not in ['unknown', 'unavailable'] }}
   - condition: template
     value_template: >-
       {{ light_ids | length > 0 and wake_timestamp | float > 0
@@ -175,11 +211,14 @@ conditions:
     value_template: >-
       {{ allowed_days | length == 0 or
          (wake_timestamp | float | timestamp_custom('%a', true) | lower) in allowed_days }}
-  # last_triggered is read BEFORE this run updates it. This blocks repeated
-  # starts within this sunrise window, including after manual cancellation.
+  # Only a saved running record may bypass last_triggered. Terminal outcomes
+  # also block retries if last_triggered was lost or reset.
   - condition: template
     value_template: >-
-      {{ as_timestamp(this.attributes.get('last_triggered'), 0) < start_timestamp | float }}
+      {{ recovery_pending or
+         (as_timestamp(this.attributes.get('last_triggered'), 0) < start_timestamp | float
+          and not (recovery_helper and saved_finish == wake_timestamp | float
+                   and recovery_record.get('status') in ['cancelled', 'completed'])) }}
   - condition: template
     value_template: >-
       {{ expand(light_ids) | list | length > 0 and
@@ -199,6 +238,26 @@ actions:
       initial_progress: "{{ [[(as_timestamp(now()) - beginning) / (duration_seconds | float), 0] | max, 1] | min }}"
       initial_level: "{{ ([low_brightness | float, high_brightness | float] | min) + ((high_brightness | float) - ([low_brightness | float, high_brightness | float] | min)) * (initial_progress ** 2) }}"
       initial_kelvin: "{{ 1000000 / ((1000000 / (warm | float)) + ((1000000 / (daylight | float)) - (1000000 / (warm | float))) * initial_progress) }}"
+  # Never switch an off light back on when recovering an interrupted run.
+  - if:
+      - condition: template
+        value_template: "{{ recovery_pending and expand(members) | selectattr('state', 'eq', 'on') | list | length != members | length }}"
+    then:
+      - action: input_text.set_value
+        target:
+          entity_id: "{{ recovery_helper }}"
+        data:
+          value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
+      - stop: Sunrise recovery cancelled because a wake-up light is off.
+  - if:
+      - condition: template
+        value_template: "{{ recovery_helper != '' }}"
+    then:
+      - action: input_text.set_value
+        target:
+          entity_id: "{{ recovery_helper }}"
+        data:
+          value: "{{ 'running|' ~ beginning ~ '|' ~ finish }}"
   - repeat:
       for_each: "{{ members }}"
       sequence:
@@ -224,6 +283,15 @@ actions:
       - condition: template
         value_template: "{{ not wait.completed }}"
     then:
+      - if:
+          - condition: template
+            value_template: "{{ recovery_helper != '' }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ recovery_helper }}"
+            data:
+              value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
       - stop: Sunrise cancelled because wake-up lights did not all report on before the startup timeout or wake-up time.
   - repeat:
       while:
@@ -258,11 +326,35 @@ actions:
           timeout:
             seconds: "{{ fade_seconds }}"
           continue_on_timeout: true
+        # Persist cancellation immediately, even if the light is switched back on.
         - if:
             - condition: template
               value_template: "{{ wait.completed }}"
           then:
+            - if:
+                - condition: template
+                  value_template: "{{ recovery_helper != '' }}"
+              then:
+                - action: input_text.set_value
+                  target:
+                    entity_id: "{{ recovery_helper }}"
+                  data:
+                    value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
             - stop: Sunrise cancelled because a light was switched off or became unavailable.
+  - if:
+      - condition: template
+        value_template: "{{ expand(members) | selectattr('state', 'eq', 'on') | list | length != members | length }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ recovery_helper != '' }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ recovery_helper }}"
+            data:
+              value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
+      - stop: Sunrise cancelled because a light was switched off or became unavailable.
   - condition: template
     value_template: "{{ as_timestamp(now()) >= finish and expand(members) | selectattr('state', 'eq', 'on') | list | length == members | length }}"
   - repeat:
@@ -280,5 +372,15 @@ actions:
               {% set payload = dict(payload, color_temp_kelvin=k | round(0) | int) %}
             {% endif %}
             {{ payload }}
+  # Mark complete before user actions so they are not replayed after a reload.
+  - if:
+      - condition: template
+        value_template: "{{ recovery_helper != '' }}"
+    then:
+      - action: input_text.set_value
+        target:
+          entity_id: "{{ recovery_helper }}"
+        data:
+          value: "{{ 'completed|' ~ beginning ~ '|' ~ finish }}"
   - choose: []
     default: !input after_sunrise
