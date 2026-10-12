@@ -48,6 +48,12 @@ Existing automations saved with the previous one-item sensor list remain support
 
 On Android, enable the Companion App's **Next Alarm** sensor and select its entity in the automation. Android can report alarms scheduled by different apps; the sensor's package allow list can help filter these. See the official [Next alarm sensor documentation](https://companion.home-assistant.io/docs/core/sensors/#next-alarm-sensor).
 
+**Next-alarm trigger limitation: an earlier alarm from another app can hide your wake-up alarm.** Android exposes only the next scheduled alarm across all apps. The package allow list filters that result; it cannot look past an excluded alarm to retrieve a later alarm from an allowed app.
+
+For example, a **06:30** wake-up alarm with a **30-minute sunrise duration** needs to be visible to the blueprint at **06:00**. If a calendar app has an alarm scheduled for **06:15**, that earlier alarm can hide the 06:30 alarm, even when only your clock app is allowed. At 06:00, the blueprint cannot see the intended wake-up alarm, so **the next-alarm trigger for Sunrise Wake-up is missed**. Filtering out the calendar app does not prevent this missed next-alarm trigger.
+
+Do not rely on the package allow list to guarantee the next-alarm trigger for Sunrise Wake-up when other apps schedule earlier alarms. Use **Manual wake-up time**, or supply a timestamp sensor that exposes the intended wake-up alarm independently of Android's next-alarm result.
+
 For an iPhone, supply a timestamp sensor separately, as described in the blueprint's input help.
 
 Missing, invalid, or expired alarms are skipped. This mode does not fall back to the manual wake-up time. Once a sunrise starts, its finish time is fixed: changing or clearing the phone alarm does not move or cancel that active run.
@@ -183,6 +189,7 @@ To check recovery, select a recovery helper, start a sunrise, then reload automa
 | Interrupted sunrise does not resume | Check the dedicated recovery helper, its saved running state, the original finish time, and the selected lights. Recovery requires all lights to be available and already on; an off light cancels recovery. |
 | Next-alarm mode does nothing | Select exactly one timestamp sensor and check its state in Home Assistant. It must contain a valid future alarm date and time outside any enabled ignore range. |
 | Wrong phone alarm is used | Check the Android sensor's package information and allow list. |
+| Next-alarm trigger for Sunrise Wake-up is missed despite the app allow list | An earlier alarm from another app can hide the intended wake-up alarm at the calculated sunrise start time. The allow list cannot look past it. Use manual mode or a timestamp sensor exposing the intended wake-up alarm independently. |
 | Lights flicker or visibly step | Increase starting brightness for flicker. Lights without reported transition support use steps; reduce the update interval for smaller changes. |
 | Color temperature does not change | Check the light's color-temperature support and range. Brightness-only lights skip color changes. |
 | Final settings or wake-up actions arrive late | Inspect light service durations in the automation trace and bulb connectivity. The loop subtracts command time from its waits, but it cannot remove delays from slow service calls or devices. |
