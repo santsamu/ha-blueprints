@@ -1,5 +1,5 @@
 blueprint:
-  name: SONOFF Zigbee Scene Cycle
+  name: Sonoff Zigbee Button Scene Cycle
   description: >-
     Cycle through an ordered list of scenes with each double press of a SONOFF
     Zigbee button paired through ZHA. Supports eWeLink WB01 and SNZB-01P.
