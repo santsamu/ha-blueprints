@@ -43,6 +43,13 @@ def as_timestamp(value, default=0):
             return default
 
 
+def strptime(value, fmt, default=None):
+    try:
+        return datetime.strptime(value, fmt)
+    except (TypeError, ValueError):
+        return default
+
+
 class Stopped(Exception):
     pass
 
@@ -84,6 +91,7 @@ class Simulation:
                 second=int(value.split(":")[2]), microsecond=0),
             states=lambda entity: self.states.get(entity, "unknown"),
             as_timestamp=as_timestamp,
+            strptime=strptime,
             expand=lambda entities: [SimpleNamespace(entity_id=entity,
                 state=self.states.get(entity, "unknown")) for entity in sorted(set(entities))],
             is_state=lambda entity, state: self.states.get(entity) == state,

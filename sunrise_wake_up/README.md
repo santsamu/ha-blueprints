@@ -1,6 +1,6 @@
 # Sunrise Wake-up
 
-Simulate a gentle sunrise that finishes at your wake-up time. Brightness rises slowly at first. Choose a warm-white-to-daylight fade or a colorful sunrise with five editable colors, and schedule it using a daily manual time or a timestamp sensor containing your next alarm.
+Simulate a gentle sunrise that finishes at your wake-up time. Brightness rises slowly at first. Choose a warm-white-to-daylight fade or a colorful sunrise with five editable colors, and schedule it using a daily manual time, a time helper, or a timestamp sensor containing your next alarm.
 
 For example, a **07:00 wake-up time** with a **30-minute duration** starts the sunrise at approximately **06:30** and reaches the final light settings at **07:00**.
 
@@ -11,8 +11,9 @@ For example, a **07:00 wake-up time** with a **30-minute duration** starts the s
 - Home Assistant **2024.10.0 or newer**.
 - One or more lights reporting dimming support through `supported_color_modes`. Color-temperature and transition support are optional.
 - For next-alarm mode, exactly one sensor with the `timestamp` device class whose state contains the alarm date and time, preferably with a time-zone offset.
+- For time-helper mode, exactly one `input_datetime` helper configured with time only (`has_time: true`, `has_date: false`).
 
-No helpers or Time & Date integration are required for normal operation. Restart recovery uses an optional dedicated Text helper. Lights that support transitions can fade smoothly between updates.
+Manual and next-alarm modes do not require helpers. No Time & Date integration is required. Restart recovery uses an optional dedicated Text helper. Lights that support transitions can fade smoothly between updates.
 
 ## Installation
 
@@ -40,9 +41,17 @@ After importing or installing it, select **Create automation** for the blueprint
 
 Choose **Manual wake-up time** and set the time at which the sunrise should finish. The blueprint uses Home Assistant's local time zone and repeats on the selected wake-up days. Leave the days empty to run every day.
 
+### Time helper
+
+Create a **Date and/or time** helper under **Settings > Devices & services > Helpers**, and configure it with **time only**, without a date. Choose **Time helper** as the wake-up time source and select the helper in **Wake-up time helper**. See the official [Input Datetime helper documentation](https://www.home-assistant.io/integrations/input_datetime/).
+
+The helper stores the time at which the sunrise should finish in Home Assistant's local time zone. Like manual mode, it repeats on the selected wake-up days; leave the days empty to run every day. For example, a helper set to **06:30** with a **30-minute duration** starts the sunrise at **06:00**. You can change the helper from a dashboard or another automation without editing the blueprint automation.
+
+An empty selection, an unknown or unavailable helper, an invalid time, or a helper containing a date skips new runs. This mode does not fall back to the manual time. Changes are picked up by the usual 15-second schedule checks. Once a sunrise starts, its finish time is fixed: changing the helper does not move or cancel that active run. Restart recovery also retains the original finish time.
+
 ### Smartphone next alarm
 
-Choose **Smartphone next alarm** and select a next-alarm sensor. The input accepts a single sensor and is required for this mode. Leave it empty when using manual mode.
+Choose **Smartphone next alarm** and select a next-alarm sensor. The input accepts a single sensor and is required for this mode. Leave it empty when using manual or time-helper mode.
 
 Existing automations saved with the previous one-item sensor list remain supported. If an existing automation has multiple alarm sensors selected, edit it and select just one.
 
@@ -52,7 +61,7 @@ On Android, enable the Companion App's **Next Alarm** sensor and select its enti
 
 For example, a **06:30** wake-up alarm with a **30-minute sunrise duration** needs to be visible to the blueprint at **06:00**. If a calendar app has an alarm scheduled for **06:15**, that earlier alarm can hide the 06:30 alarm, even when only your clock app is allowed. At 06:00, the blueprint cannot see the intended wake-up alarm, so **the next-alarm trigger for Sunrise Wake-up is missed**. Filtering out the calendar app does not prevent this missed next-alarm trigger.
 
-Do not rely on the package allow list to guarantee the next-alarm trigger for Sunrise Wake-up when other apps schedule earlier alarms. Use **Manual wake-up time**, or supply a timestamp sensor that exposes the intended wake-up alarm independently of Android's next-alarm result.
+Do not rely on the package allow list to guarantee the next-alarm trigger for Sunrise Wake-up when other apps schedule earlier alarms. Use **Manual wake-up time** or **Time helper**, or supply a timestamp sensor that exposes the intended wake-up alarm independently of Android's next-alarm result.
 
 For an iPhone, supply a timestamp sensor separately, as described in the blueprint's input help.
 
@@ -67,9 +76,10 @@ The start is included and the end is excluded: an alarm at 09:00 is ignored, whi
 | Setting | Default | Details |
 | --- | --- | --- |
 | Wake-up lights | Required | Select one or more dimmable light entities. A selection containing an on/off-only light or missing dimming capabilities stops before any light commands. |
-| Wake-up time source | Manual wake-up time | Choose a fixed daily time or a smartphone next alarm. |
+| Wake-up time source | Manual wake-up time | Choose a fixed daily time, a time helper, or a smartphone next alarm. |
 | Manual wake-up time | `07:00:00` | Finish time in Home Assistant's local time zone; used only in manual mode. |
-| Next alarm sensor | None | Select exactly one timestamp sensor for next-alarm mode; ignored in manual mode. |
+| Wake-up time helper | None | Select exactly one time-only `input_datetime` helper; used only in time-helper mode. |
+| Next alarm sensor | None | Select exactly one timestamp sensor for next-alarm mode; ignored in other modes. |
 | Ignore next alarms in a time range | Off | Skip alarms scheduled inside the daily local-time range; applies to new next-alarm runs. |
 | Next-alarm ignore range start | `09:00:00` | Inclusive start; used when the ignore range is enabled. |
 | Next-alarm ignore range end | `21:00:00` | Exclusive end; supports crossing midnight. Equal start and end disable the range. |
@@ -130,7 +140,7 @@ Color-temperature commands are sent only to lights reporting `color_temp` suppor
 
 To enable recovery, create a **Text** helper under **Settings > Devices & services > Helpers**, set its maximum length to **255**, and select it in **Restart recovery helper**. Use a separate helper for each automation. Leave its contents under the blueprint's control; if configured in YAML, omit `initial` so its saved state is restored. See the official [Text helper documentation](https://www.home-assistant.io/integrations/input_text/#restore-state).
 
-The blueprint saves the original start and finish times and whether the run is running, cancelled, or completed. Following a Home Assistant restart or automation reload, a saved running sunrise can resume at the progress appropriate to the current time, even if the phone alarm was changed or cleared. The original duration and finish time are retained. Recovery is checked at Home Assistant startup and on the usual 15-second schedule checks.
+The blueprint saves the original start and finish times and whether the run is running, cancelled, or completed. Following a Home Assistant restart or automation reload, a saved running sunrise can resume at the progress appropriate to the current time, even if the phone alarm was changed or cleared, or the time helper was changed or became unavailable. The original duration and finish time are retained. Recovery is checked at Home Assistant startup and on the usual 15-second schedule checks.
 
 Colorful sunrise also resumes at the color appropriate to that progress. The
 recovery record format is unchanged. Style and palette values come from the
@@ -188,8 +198,9 @@ To check recovery, select a recovery helper, start a sunrise, then reload automa
 | Sunrise stops just after turning lights on | Check the automation trace for a startup timeout. All selected lights must report `on` within 15 seconds of the initial commands completing, or before wake-up time if sooner. Check bulb connectivity and state updates. |
 | Interrupted sunrise does not resume | Check the dedicated recovery helper, its saved running state, the original finish time, and the selected lights. Recovery requires all lights to be available and already on; an off light cancels recovery. |
 | Next-alarm mode does nothing | Select exactly one timestamp sensor and check its state in Home Assistant. It must contain a valid future alarm date and time outside any enabled ignore range. |
+| Time-helper mode does nothing | Select exactly one `input_datetime` helper configured with time only, check that it is available, and confirm its time and the selected wake-up days. Helpers containing a date are skipped. |
 | Wrong phone alarm is used | Check the Android sensor's package information and allow list. |
-| Next-alarm trigger for Sunrise Wake-up is missed despite the app allow list | An earlier alarm from another app can hide the intended wake-up alarm at the calculated sunrise start time. The allow list cannot look past it. Use manual mode or a timestamp sensor exposing the intended wake-up alarm independently. |
+| Next-alarm trigger for Sunrise Wake-up is missed despite the app allow list | An earlier alarm from another app can hide the intended wake-up alarm at the calculated sunrise start time. The allow list cannot look past it. Use manual or time-helper mode, or a timestamp sensor exposing the intended wake-up alarm independently. |
 | Lights flicker or visibly step | Increase starting brightness for flicker. Lights without reported transition support use steps; reduce the update interval for smaller changes. |
 | Color temperature does not change | Check the light's color-temperature support and range. Brightness-only lights skip color changes. |
 | Final settings or wake-up actions arrive late | Inspect light service durations in the automation trace and bulb connectivity. The loop subtracts command time from its waits, but it cannot remove delays from slow service calls or devices. |

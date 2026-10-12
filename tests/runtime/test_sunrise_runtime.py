@@ -89,6 +89,11 @@ class SunriseRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "id": "sunrise_runtime", "alias": "Sunrise runtime",
             "use_blueprint": {"path": BLUEPRINT_PATH, "input": blueprint_inputs},
         }]}
+        if blueprint_inputs["time_source"] == "time_helper":
+            config["input_datetime"] = {"sunrise_runtime_wake_up": {
+                "has_time": True, "has_date": False,
+                "initial": (datetime.now(timezone.utc) + timedelta(minutes=4)).strftime("%H:%M:%S"),
+            }}
         self.assertIs(await bootstrap.async_from_config_dict(config, self.hass), self.hass)
         await self.hass.data[light.DATA_COMPONENT].async_add_entities(lamps)
         self.hass.states.async_set("sensor.sunrise_runtime_alarm",
@@ -151,6 +156,15 @@ class SunriseRuntimeTests(unittest.IsolatedAsyncioTestCase):
         await self.load([lamp], rejected=True, sunrise_style="colorful", sunrise_color_50=[0, 0, 0])
         self.assertEqual(lamp.calls, [])
         self.assertEqual(self.hass.states.get(AUTOMATION).attributes["current"], 0)
+
+    async def test_time_only_helper_starts_sunrise_through_native_templates(self):
+        lamp = RecordingLight("runtime_helper", [ColorMode.BRIGHTNESS])
+        await self.load([lamp], time_source="time_helper",
+                        wake_up_time_helper="input_datetime.sunrise_runtime_wake_up")
+        helper = self.hass.states.get("input_datetime.sunrise_runtime_wake_up")
+        self.assertTrue(helper.attributes["has_time"])
+        self.assertFalse(helper.attributes["has_date"])
+        self.assertEqual(lamp.calls[0]["brightness"], 51)
 
 
 if __name__ == "__main__":

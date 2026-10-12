@@ -6,7 +6,7 @@ A collection of automation blueprints for Home Assistant. Each blueprint has its
 
 | Blueprint | Description | Minimum Home Assistant version |
 | --- | --- | --- |
-| [Sunrise Wake-up](sunrise_wake_up/README.md) | Gradually brighten your lights before a fixed wake-up time or your next phone alarm, with a white fade or five editable sunrise colors. | 2024.10.0 |
+| [Sunrise Wake-up](sunrise_wake_up/README.md) | Gradually brighten your lights using a manual time, a time helper, or your next phone alarm, with a white fade or five editable sunrise colors. | 2024.10.0 |
 | [Sonoff Zigbee Button](sonoff_zigbee_button/README.md) | Assign actions to press, double press, and hold on a SONOFF button paired through ZHA. | 2024.10.0 |
 
 ## Getting started

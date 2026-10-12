@@ -14,6 +14,8 @@ steps with simulated lights, timestamps, helper storage, and state updates. They
 cover restart recovery, cancellation, completion, startup waits, and mixed light
 capabilities, including fading, stepping, and color-temperature limits. Timing
 checks simulate slow light commands, missed update deadlines, and cancellation.
+Time-helper checks cover daily scheduling, local time, midnight and weekday
+boundaries, invalid helpers, changes before and during a run, and recovery.
 Color checks cover editable palette checkpoints, interpolation and normalization,
 capability fallbacks, checkpoint deadlines, late commands, and recovery.
 Sonoff checks evaluate the actual blueprint's gesture conditions, including
@@ -34,6 +36,7 @@ Sunrise tests use the native light service and recording light entities in place
 of hardware. They verify blueprint import, RGB conversion to each supported color
 format, temperature and brightness fallbacks, the default white style, and
 rejection of black palettes before commands.
+They also verify scheduling from a native time-only Input Datetime helper.
 
 Run on Linux with Python 3.12 for the minimum supported Home Assistant release:
 
@@ -86,8 +89,8 @@ docker run --rm `
   python:3.14-slim sh -c 'python -m pip install -q -r tests/runtime/requirements-2026.10.0.txt && python -m unittest discover -s tests/runtime -v'
 ```
 
-Successful suites finish with `OK`: currently **62 simulation checks** and
-**15 runtime tests per Home Assistant version**. If installation or a test suite
+Successful suites finish with `OK`: currently **74 simulation checks** and
+**16 runtime tests per Home Assistant version**. If installation or a test suite
 fails, the command exits with a nonzero code; check `$LASTEXITCODE` immediately
 after the Docker command.
 

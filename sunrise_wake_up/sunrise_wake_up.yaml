@@ -1,15 +1,16 @@
 blueprint:
-  name: Sunrise Wake-up — Manual Time or Next Alarm
+  name: Sunrise Wake-up — Manual Time, Time Helper or Next Alarm
   description: >
     A gentle simulated sunrise that FINISHES at your wake-up time. Choose a
-    daily manual time or a timestamp sensor such as Android's Next Alarm.
+    daily manual time, a time-only helper, or a timestamp sensor such as Android's Next Alarm.
     Brightness rises slowly at first, while tunable-white lights move from
     warm white toward daylight. Optional Colorful sunrise blends through five
-    editable colors on color-capable lights. No Time & Date integration required. Helpers are
-    optional; select a dedicated Text helper to enable restart/reload recovery.
+    editable colors on color-capable lights. No Time & Date integration required.
+    Manual and next-alarm modes need no helpers. Select a dedicated Text helper
+    to enable restart/reload recovery.
     Checks the schedule every 15 seconds. Turning any selected light off during
     the ramp cancels the entire sunrise. The finish time is captured when the
-    run starts; subsequent phone-alarm changes do not move an active sunrise.
+    run starts; subsequent phone-alarm or time-helper changes do not move an active sunrise.
     An optional daily time range filters out next alarms by their local alarm time.
     Recovery resumes only before that deadline and while all lights remain on.
   domain: automation
@@ -36,6 +37,8 @@ blueprint:
           options:
             - label: Manual wake-up time
               value: manual
+            - label: Time helper
+              value: time_helper
             - label: Smartphone next alarm
               value: next_alarm
     wake_up_time:
@@ -44,10 +47,24 @@ blueprint:
       default: "07:00:00"
       selector:
         time: {}
+    wake_up_time_helper:
+      name: Wake-up time helper
+      description: >
+        Required in time-helper mode; leave empty in other modes. Select one
+        Date and/or time helper configured with time only (no date). Sunrise
+        ends at its time in Home Assistant's local time zone and repeats on
+        the selected wake-up days. Missing, unavailable, or invalid helpers
+        are skipped; there is no fallback to the manual time.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_datetime
+          multiple: false
     next_alarm_sensor:
       name: Next alarm sensor
       description: >
-        Required in next-alarm mode; leave empty in manual mode. Select one
+        Required in next-alarm mode; leave empty in other modes. Select one
         sensor whose state contains the alarm date and time, preferably with a
         time-zone offset. Android provides
         this through the Companion App's Next Alarm sensor. iPhone needs a
@@ -243,6 +260,7 @@ variables:
   light_ids: !input lights
   source: !input time_source
   manual_time: !input wake_up_time
+  time_helper: !input wake_up_time_helper
   alarm_sensor: !input next_alarm_sensor
   alarm_ignore_enabled: !input next_alarm_ignore_enabled
   alarm_ignore_start: !input next_alarm_ignore_start
@@ -287,6 +305,17 @@ variables:
         {{ 0 if ignored else alarm }}
       {% else %}
         {{ alarm }}
+      {% endif %}
+    {% elif source == 'time_helper' %}
+      {% set helper_time = states(time_helper) if time_helper else '' %}
+      {% if time_helper and state_attr(time_helper, 'has_time') == true
+         and state_attr(time_helper, 'has_date') == false
+         and strptime(helper_time, '%H:%M:%S', none) is not none %}
+        {% set wake = today_at(helper_time) %}
+        {% if wake <= now() %}{% set wake = wake + timedelta(days=1) %}{% endif %}
+        {{ as_timestamp(wake) }}
+      {% else %}
+        {{ 0 }}
       {% endif %}
     {% else %}
       {% set wake = today_at(manual_time) %}
