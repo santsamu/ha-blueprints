@@ -14,7 +14,6 @@ from homeassistant.core import HomeAssistant
 
 
 BLUEPRINT_PATH = "sunrise_wake_up/sunrise_wake_up.yaml"
-BLUEPRINT = Path(__file__).resolve().parents[2] / BLUEPRINT_PATH
 AUTOMATION = "automation.sunrise_runtime"
 COLOR_INPUTS = [f"sunrise_color_{percent}" for percent in (0, 25, 50, 75, 100)]
 
@@ -56,13 +55,16 @@ class RecordingLight(LightEntity):
         self.async_write_ha_state()
 
 
-class SunriseRuntimeTests(unittest.IsolatedAsyncioTestCase):
+class SunriseRuntimeHarness(unittest.IsolatedAsyncioTestCase):
+    blueprint_path = BLUEPRINT_PATH
+    source_inputs = {"time_source": "next_alarm", "next_alarm_sensor": "sensor.sunrise_runtime_alarm"}
+
     async def asyncSetUp(self):
         self.temp = TemporaryDirectory(prefix="ha-sunrise-runtime-")
         self.addCleanup(self.temp.cleanup)
-        destination = Path(self.temp.name) / "blueprints/automation" / BLUEPRINT_PATH
+        destination = Path(self.temp.name) / "blueprints/automation" / self.blueprint_path
         destination.parent.mkdir(parents=True)
-        shutil.copyfile(BLUEPRINT, destination)
+        shutil.copyfile(Path(__file__).resolve().parents[2] / self.blueprint_path, destination)
         self.hass = HomeAssistant(self.temp.name)
         self.hass.config.skip_pip = True
         loader.async_setup(self.hass)
@@ -75,10 +77,11 @@ class SunriseRuntimeTests(unittest.IsolatedAsyncioTestCase):
             while not predicate():
                 await asyncio.sleep(0.005)
 
-    async def load(self, lamps, *, rejected=False, **inputs):
+    async def load(self, lamps, *, rejected=False, blocked=False, enabled=True,
+                   extra_config=None, **inputs):
         blueprint_inputs = {
             "lights": [lamp.entity_id for lamp in lamps],
-            "time_source": "next_alarm", "next_alarm_sensor": "sensor.sunrise_runtime_alarm",
+            **self.source_inputs,
             "sunrise_duration": 5, "initial_brightness": 20, "final_brightness": 20,
             **inputs,
         }
@@ -87,15 +90,29 @@ class SunriseRuntimeTests(unittest.IsolatedAsyncioTestCase):
             "time_zone": "UTC", "unit_system": "metric", "currency": "CHF",
         }, "light": [], "automation": [{
             "id": "sunrise_runtime", "alias": "Sunrise runtime",
-            "use_blueprint": {"path": BLUEPRINT_PATH, "input": blueprint_inputs},
+            "use_blueprint": {"path": self.blueprint_path, "input": blueprint_inputs},
         }]}
-        if blueprint_inputs["time_source"] == "time_helper":
-            config["input_datetime"] = {"sunrise_runtime_wake_up": {
+        if blueprint_inputs.get("wake_up_time_helper"):
+            helper_name = blueprint_inputs["wake_up_time_helper"].split(".")[1]
+            config["input_datetime"] = {helper_name: {
                 "has_time": True, "has_date": False,
                 "initial": (datetime.now(timezone.utc) + timedelta(minutes=4)).strftime("%H:%M:%S"),
             }}
+        if blueprint_inputs.get("enabled_helper"):
+            helper_name = blueprint_inputs["enabled_helper"].split(".")[1]
+            config["input_boolean"] = {helper_name: {"initial": enabled}}
+        if blueprint_inputs.get("recovery_helper"):
+            helper_name = blueprint_inputs["recovery_helper"].split(".")[1]
+            config["input_text"] = {helper_name: {"max": 255}}
+        config.update(extra_config or {})
         self.assertIs(await bootstrap.async_from_config_dict(config, self.hass), self.hass)
         await self.hass.data[light.DATA_COMPONENT].async_add_entities(lamps)
+        recovery_helper = blueprint_inputs.get("recovery_helper")
+        if recovery_helper and self.hass.states.get(recovery_helper).state == "unknown":
+            # A new YAML helper has no restored value in this temporary HA config.
+            await self.hass.services.async_call("input_text", "set_value",
+                                                {"entity_id": recovery_helper, "value": ""},
+                                                blocking=True)
         self.hass.states.async_set("sensor.sunrise_runtime_alarm",
                                    (datetime.now(timezone.utc) + timedelta(minutes=4)).isoformat(),
                                    {"device_class": "timestamp"})
@@ -103,13 +120,19 @@ class SunriseRuntimeTests(unittest.IsolatedAsyncioTestCase):
         state = self.hass.states.get(AUTOMATION)
         self.assertIsNotNone(state, "The repository blueprint must import successfully")
         self.assertEqual(state.state, "on")
-        if rejected:
+        if rejected or blocked:
             async with asyncio.timeout(5):
                 await self.hass.async_block_till_done()
-            self.assertIsNotNone(self.hass.states.get(AUTOMATION).attributes["last_triggered"])
+            last_triggered = self.hass.states.get(AUTOMATION).attributes["last_triggered"]
+            if blocked:
+                self.assertIsNone(last_triggered)
+            else:
+                self.assertIsNotNone(last_triggered)
         else:
             await self.wait_until(lambda: all(lamp.calls for lamp in lamps))
 
+
+class SunriseRuntimeTests(SunriseRuntimeHarness):
     async def test_rgb_palette_is_converted_to_each_supported_native_color_mode(self):
         fields = [(ColorMode.RGB, "rgb_color"), (ColorMode.HS, "hs_color"),
                   (ColorMode.XY, "xy_color"), (ColorMode.RGBW, "rgbw_color"),

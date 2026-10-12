@@ -55,10 +55,11 @@ class Stopped(Exception):
 
 
 class Simulation:
-    def __init__(self, record=None, helper=True, light_state="on", **inputs):
+    def __init__(self, record=None, helper=True, light_state="on", blueprint=None, **inputs):
+        self.blueprint = BLUEPRINT if blueprint is None else blueprint
         self.time = datetime.fromtimestamp(START + 600, timezone.utc)
         self.inputs = {key: value.get("default")
-                       for key, value in BLUEPRINT["blueprint"]["input"].items()}
+                       for key, value in self.blueprint["blueprint"]["input"].items()}
         self.inputs.update(lights=LIGHTS, recovery_helper=HELPER if helper else "",
                            after_sunrise=[{"action": "test.wake_up"}], **inputs)
         self.states = {entity: light_state for entity in LIGHTS}
@@ -118,7 +119,7 @@ class Simulation:
     def prepare(self):
         self.context = {"this": SimpleNamespace(
             attributes={"last_triggered": self.last_triggered})}
-        for name, value in BLUEPRINT["variables"].items():
+        for name, value in self.blueprint["variables"].items():
             self.context[name] = self.render(value)
 
     def matches(self, conditions):
@@ -126,7 +127,7 @@ class Simulation:
 
     def eligible(self):
         self.prepare()
-        return self.matches(BLUEPRINT["conditions"])
+        return self.matches(self.blueprint["conditions"])
 
     def advance(self, seconds):
         deadline = self.time + timedelta(seconds=seconds)
@@ -219,7 +220,7 @@ class Simulation:
             return False
         self.last_triggered = self.time
         try:
-            self.execute(BLUEPRINT["actions"])
+            self.execute(self.blueprint["actions"])
         except Stopped as exc:
             self.reason = str(exc)
         return True

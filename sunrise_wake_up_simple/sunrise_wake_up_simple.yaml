@@ -1,0 +1,612 @@
+blueprint:
+  name: Sunrise Wake-up Simple — Time Helper
+  description: >
+    A gentle sunrise that finishes at the time stored in a time-only helper.
+    An on/off helper enables the schedule and stops an active sunrise when off.
+    Choose White sunrise or Colorful sunrise with five editable colors.
+    Supports wake-up days, optional restart recovery, and actions at wake-up time.
+    Checks the schedule every 15 seconds. Turning any selected light off cancels
+    the entire sunrise. The finish time is fixed once a run starts.
+  domain: automation
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    lights:
+      name: Wake-up lights
+      description: >
+        Select dimmable lights. On/off-only lights or missing dimming capabilities
+        stop the run before any light commands. Tunable-white lights also change
+        color temperature; color-capable lights can use an editable sunrise palette.
+        Lights without transition support use brightness steps.
+      selector:
+        entity:
+          filter:
+            - domain: light
+          multiple: true
+    wake_up_time_helper:
+      name: Wake-up time helper
+      description: >
+        Select one Date and/or time helper configured with time only (no date). Sunrise
+        ends at its time in Home Assistant's local time zone and repeats on
+        the selected wake-up days. Missing, unavailable, or invalid helpers
+        are skipped.
+      selector:
+        entity:
+          filter:
+            - domain: input_datetime
+          multiple: false
+    enabled_helper:
+      name: Sunrise enabled helper
+      description: >
+        Select a Toggle helper (input_boolean). On enables scheduled runs and
+        restart recovery. Off stops an active sunrise and skips wake-up actions;
+        lights retain their last commanded settings. Unknown or unavailable
+        states are treated as off. The blueprint does not change this helper.
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+          multiple: false
+    sunrise_duration:
+      name: Sunrise duration
+      description: Minutes BEFORE the wake-up time. For 07:00 and 30 minutes, sunrise starts at 06:30.
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 120
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+    weekdays:
+      name: Wake-up days
+      description: Applies to the day of the wake-up time, including when sunrise starts the previous evening. Empty means every day.
+      default: []
+      selector:
+        select:
+          multiple: true
+          options:
+            - { label: Monday, value: mon }
+            - { label: Tuesday, value: tue }
+            - { label: Wednesday, value: wed }
+            - { label: Thursday, value: thu }
+            - { label: Friday, value: fri }
+            - { label: Saturday, value: sat }
+            - { label: Sunday, value: sun }
+    initial_brightness:
+      name: Starting brightness
+      description: Increase if your bulbs flicker at low brightness. Clamped to the final brightness.
+      default: 1
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+    final_brightness:
+      name: Final brightness
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+    sunrise_style:
+      name: Sunrise style
+      description: >-
+        White sunrise uses the color-temperature settings below. Colorful sunrise
+        blends through five editable colors on color-capable lights. Tunable-white
+        lights keep their temperature fade; brightness-only lights keep dimming.
+      default: white
+      selector:
+        select:
+          options:
+            - label: White sunrise
+              value: white
+            - label: Colorful sunrise
+              value: colorful
+    sunrise_color_0:
+      name: Sunrise color at 0%
+      description: >-
+        Starting color in Colorful sunrise mode. Brightness is controlled separately
+        above; darker RGB values are normalized to the same color at full intensity.
+        Choose a non-black color. All selected color lights share this palette.
+      default: [64, 32, 255]
+      selector:
+        color_rgb: {}
+    sunrise_color_25:
+      name: Sunrise color at 25%
+      description: Color one quarter through Colorful sunrise. Choose a non-black color.
+      default: [255, 64, 128]
+      selector:
+        color_rgb: {}
+    sunrise_color_50:
+      name: Sunrise color at 50%
+      description: Color halfway through Colorful sunrise. Choose a non-black color.
+      default: [255, 128, 0]
+      selector:
+        color_rgb: {}
+    sunrise_color_75:
+      name: Sunrise color at 75%
+      description: Color three quarters through Colorful sunrise. Choose a non-black color.
+      default: [255, 214, 170]
+      selector:
+        color_rgb: {}
+    sunrise_color_100:
+      name: Sunrise color at 100%
+      description: >-
+        Final color in Colorful sunrise mode. Overrides Final color temperature
+        for color-capable lights and can be any non-black color, including white.
+      default: [220, 235, 255]
+      selector:
+        color_rgb: {}
+    warm_kelvin:
+      name: Starting color temperature
+      description: Automatically limited to each light's supported range. Used in White sunrise and for tunable-white fallback in Colorful sunrise.
+      default: 2000
+      selector:
+        number:
+          min: 1500
+          max: 6500
+          step: 100
+          unit_of_measurement: K
+    daylight_kelvin:
+      name: Final color temperature
+      description: Used in White sunrise and for tunable-white fallback. Color-capable lights in Colorful sunrise finish at the selected 100% color.
+      default: 5500
+      selector:
+        number:
+          min: 1500
+          max: 6500
+          step: 100
+          unit_of_measurement: K
+    step_seconds:
+      name: Update interval
+      description: >
+        Lights supporting transitions fade smoothly between updates. Other lights
+        step to the brightness appropriate to the current time. Try 10–30 seconds,
+        or a shorter interval for smaller steps on lights without transitions.
+      default: 15
+      selector:
+        number:
+          min: 5
+          max: 60
+          step: 1
+          unit_of_measurement: s
+    recovery_helper:
+      name: Restart recovery helper
+      description: >
+        Optional. Select a dedicated Text helper (input_text) with maximum length
+        255 and no initial value. Do not share it with another automation or edit
+        its contents. Stores the run's original times and outcome so a restart or
+        automation reload can resume an interrupted sunrise if every light is
+        still on. Cancelled and completed runs are not resumed. Leave empty to
+        keep the helper-free behavior.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+          multiple: false
+    after_sunrise:
+      name: Actions at wake-up time
+      description: Optional actions after successful completion, such as playing music. Not run after cancellation.
+      default: []
+      selector:
+        action: {}
+
+mode: single
+max_exceeded: silent
+
+triggers:
+  - trigger: time_pattern
+    seconds: "/15"
+  - trigger: homeassistant
+    event: start
+
+variables:
+  light_ids: !input lights
+  time_helper: !input wake_up_time_helper
+  enabled_helper: !input enabled_helper
+  minutes: !input sunrise_duration
+  allowed_days: !input weekdays
+  low_brightness: !input initial_brightness
+  high_brightness: !input final_brightness
+  style: !input sunrise_style
+  color_0: !input sunrise_color_0
+  color_25: !input sunrise_color_25
+  color_50: !input sunrise_color_50
+  color_75: !input sunrise_color_75
+  color_100: !input sunrise_color_100
+  color_palette: "{{ [color_0, color_25, color_50, color_75, color_100] }}"
+  warm: !input warm_kelvin
+  daylight: !input daylight_kelvin
+  interval: !input step_seconds
+  recovery_helper: !input recovery_helper
+  # Text format avoids newer from_json(default) support; keep HA 2024.10 compatibility.
+  recovery_fields: "{{ states(recovery_helper).split('|') if recovery_helper else [] }}"
+  recovery_record: >-
+    {{ dict(status=recovery_fields[0], beginning=recovery_fields[1], finish=recovery_fields[2])
+       if recovery_fields | length == 3 else {} }}
+  saved_beginning: "{{ recovery_record.get('beginning', 0) | float(0) }}"
+  saved_finish: "{{ recovery_record.get('finish', 0) | float(0) }}"
+  recovery_pending: >-
+    {{ recovery_helper != '' and recovery_record.get('status') == 'running'
+       and saved_beginning > 0 and 300 <= saved_finish - saved_beginning <= 7200
+       and saved_beginning <= as_timestamp(now()) < saved_finish }}
+  scheduled_wake_timestamp: >-
+    {% set helper_time = states(time_helper) if time_helper else '' %}
+    {% if time_helper and state_attr(time_helper, 'has_time') == true
+       and state_attr(time_helper, 'has_date') == false
+       and strptime(helper_time, '%H:%M:%S', none) is not none %}
+      {% set wake = today_at(helper_time) %}
+      {% if wake <= now() %}{% set wake = wake + timedelta(days=1) %}{% endif %}
+      {{ as_timestamp(wake) }}
+    {% else %}
+      {{ 0 }}
+    {% endif %}
+  wake_timestamp: "{{ saved_finish if recovery_pending else scheduled_wake_timestamp | float }}"
+  duration_seconds: "{{ saved_finish - saved_beginning if recovery_pending else (minutes | float) * 60 }}"
+  start_timestamp: "{{ (wake_timestamp | float) - (duration_seconds | float) }}"
+
+conditions:
+  # A saved running record can enter only to record cancellation while disabled.
+  - condition: template
+    value_template: "{{ is_state(enabled_helper, 'on') or recovery_pending }}"
+  # Wait for the helper to restore before considering a start or recovery.
+  - condition: template
+    value_template: >-
+      {{ not recovery_helper or states(recovery_helper) not in ['unknown', 'unavailable'] }}
+  - condition: template
+    value_template: >-
+      {{ light_ids | length > 0 and wake_timestamp | float > 0
+         and start_timestamp | float <= as_timestamp(now()) < wake_timestamp | float }}
+  - condition: template
+    value_template: >-
+      {{ allowed_days | length == 0 or
+         (wake_timestamp | float | timestamp_custom('%a', true) | lower) in allowed_days }}
+  # Only a saved running record may bypass last_triggered. Terminal outcomes
+  # also block retries if last_triggered was lost or reset.
+  - condition: template
+    value_template: >-
+      {{ recovery_pending or
+         (as_timestamp(this.attributes.get('last_triggered'), 0) < start_timestamp | float
+          and not (recovery_helper and saved_finish == wake_timestamp | float
+                   and recovery_record.get('status') in ['cancelled', 'completed'])) }}
+  - condition: template
+    value_template: >-
+      {{ (recovery_pending and not is_state(enabled_helper, 'on')) or
+         (expand(light_ids) | list | length > 0 and
+          expand(light_ids) | rejectattr('state', 'in', ['on', 'off']) | list | length == 0) }}
+
+actions:
+  - alias: Cancel recovery while the sunrise is disabled
+    if:
+      - condition: template
+        value_template: "{{ not is_state(enabled_helper, 'on') }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ recovery_pending }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ recovery_helper }}"
+            data:
+              value: "{{ 'cancelled|' ~ saved_beginning ~ '|' ~ saved_finish }}"
+      - stop: Sunrise cancelled because its enabled helper is off or unavailable.
+  - condition: template
+    value_template: >-
+      {{ wake_timestamp | float > 0 and
+         start_timestamp | float <= as_timestamp(now()) < wake_timestamp | float }}
+  # Freeze the deadline so later time-helper changes do not move this run.
+  - variables:
+      finish: "{{ wake_timestamp | float }}"
+      beginning: "{{ start_timestamp | float }}"
+      members: "{{ expand(light_ids) | map(attribute='entity_id') | list }}"
+      light_phase: initial
+      colorful_lights: >-
+        {% set ns = namespace(entities=[]) %}
+        {% for entity in members %}
+          {% if (state_attr(entity, 'supported_color_modes') or []) | select('in', ['hs', 'xy', 'rgb', 'rgbw', 'rgbww']) | list | length > 0 %}
+            {% set ns.entities = ns.entities + [entity] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.entities }}
+      palette_valid: >-
+        {% set ns = namespace(valid=true) %}
+        {% for color in color_palette %}
+          {% if color is not sequence or color is string or color | length != 3 %}
+            {% set ns.valid = false %}
+          {% else %}
+            {% for channel in color %}
+              {% if channel is not number or channel is boolean %}
+                {% set ns.valid = false %}
+              {% elif channel | int != channel or channel < 0 or channel > 255 %}
+                {% set ns.valid = false %}
+              {% endif %}
+            {% endfor %}
+            {% if color | select('number') | list | length == 3 and color | max <= 0 %}
+              {% set ns.valid = false %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.valid }}
+      normalized_palette: >-
+        {% set ns = namespace(colors=[]) %}
+        {% if style == 'colorful' and palette_valid %}
+          {% for color in color_palette %}
+            {% set peak = color | max %}
+            {% set ns.colors = ns.colors + [[
+              (color[0] * 255 / peak) | round(0) | int,
+              (color[1] * 255 / peak) | round(0) | int,
+              (color[2] * 255 / peak) | round(0) | int]] %}
+          {% endfor %}
+        {% endif %}
+        {{ ns.colors }}
+      unsupported_lights: >-
+        {% set ns = namespace(entities=[]) %}
+        {% for entity in members %}
+          {% set modes = state_attr(entity, 'supported_color_modes') or [] %}
+          {% if modes | select('in', ['brightness', 'color_temp', 'hs', 'xy', 'rgb', 'rgbw', 'rgbww', 'white']) | list | length == 0 %}
+            {% set ns.entities = ns.entities + [entity] %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.entities }}
+      initial_progress: "{{ [[(as_timestamp(now()) - beginning) / (duration_seconds | float), 0] | max, 1] | min }}"
+      initial_level: "{{ ([low_brightness | float, high_brightness | float] | min) + ((high_brightness | float) - ([low_brightness | float, high_brightness | float] | min)) * (initial_progress ** 2) }}"
+      initial_kelvin: "{{ 1000000 / ((1000000 / (warm | float)) + ((1000000 / (daylight | float)) - (1000000 / (warm | float))) * initial_progress) }}"
+  - alias: Validate dimming support before changing lights
+    if:
+      - condition: template
+        value_template: "{{ members | length == 0 or unsupported_lights | length > 0 }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ recovery_helper != '' }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ recovery_helper }}"
+            data:
+              value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
+      - stop: Sunrise cancelled because no lights were selected or a selected light does not report dimming support. Select dimmable lights; check unsupported_lights in the trace.
+  - alias: Validate the colorful sunrise palette before changing lights
+    if:
+      - condition: template
+        value_template: "{{ style == 'colorful' and not palette_valid }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ recovery_helper != '' }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ recovery_helper }}"
+            data:
+              value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
+      - stop: Sunrise cancelled because a palette color is invalid or black. Each checkpoint needs three whole RGB values from 0 to 255 with at least one above zero. Control dimming with the brightness settings.
+  # Never switch an off light back on when recovering an interrupted run.
+  - if:
+      - condition: template
+        value_template: "{{ recovery_pending and expand(members) | selectattr('state', 'eq', 'on') | list | length != members | length }}"
+    then:
+      - action: input_text.set_value
+        target:
+          entity_id: "{{ recovery_helper }}"
+        data:
+          value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
+      - stop: Sunrise recovery cancelled because a wake-up light is off.
+  - if:
+      - condition: template
+        value_template: "{{ recovery_helper != '' }}"
+    then:
+      - action: input_text.set_value
+        target:
+          entity_id: "{{ recovery_helper }}"
+        data:
+          value: "{{ 'running|' ~ beginning ~ '|' ~ finish }}"
+  - repeat:
+      for_each: "{{ members }}"
+      sequence:
+        - if:
+            - condition: template
+              value_template: "{{ is_state(enabled_helper, 'on') }}"
+          then:
+            - action: light.turn_on
+              target:
+                entity_id: "{{ repeat.item }}"
+              # Reuse this payload at startup, during the ramp, and at completion.
+              data: &sunrise_light_payload >-
+                {# LightEntityFeature.TRANSITION = 32. #}
+                {% set can_fade = (state_attr(repeat.item, 'supported_features') | int(0) | bitwise_and(32)) != 0 %}
+                {% set remaining = 0 %}
+                {% if light_phase == 'initial' %}
+                  {% set p = initial_progress | float %}
+                  {% set level = initial_level | float %}
+                  {% set kelvin = initial_kelvin | float %}
+                {% elif light_phase == 'final' %}
+                  {% set p = 1 %}
+                  {% set level = high_brightness | int %}
+                  {% set kelvin = daylight | float %}
+                {% else %}
+                  {% set current = as_timestamp(now()) %}
+                  {% set remaining = [step_deadline - current, 0] | max %}
+                  {# Late commands catch up; stepping bulbs target the current time. #}
+                  {% set target_time = ([step_deadline, current] | max) if can_fade else current %}
+                  {% set p = [[(target_time - beginning) / (duration_seconds | float), 0] | max, 1] | min %}
+                  {% set low = [low_brightness | float, high_brightness | float] | min %}
+                  {% set level = low + ((high_brightness | float) - low) * (p ** 2) %}
+                  {% set kelvin = 1000000 / ((1000000 / (warm | float)) + ((1000000 / (daylight | float)) - (1000000 / (warm | float))) * p) %}
+                {% endif %}
+                {% set payload = dict(brightness_pct=level | round(0) | int) %}
+                {% if can_fade %}
+                  {% set payload = dict(payload, transition=remaining) %}
+                {% endif %}
+                {% if style == 'colorful' and repeat.item in colorful_lights %}
+                  {% set position = p * 4 %}
+                  {% set index = [position | int, 3] | min %}
+                  {% set fraction = position - index %}
+                  {% set a = normalized_palette[index] %}
+                  {% set b = normalized_palette[index + 1] %}
+                  {% set rgb = [a[0] + (b[0] - a[0]) * fraction,
+                                a[1] + (b[1] - a[1]) * fraction,
+                                a[2] + (b[2] - a[2]) * fraction] %}
+                  {# Keep color intensity independent of the brightness curve. #}
+                  {% set peak = rgb | max %}
+                  {% set payload = dict(payload, rgb_color=[
+                    (rgb[0] * 255 / peak) | round(0) | int,
+                    (rgb[1] * 255 / peak) | round(0) | int,
+                    (rgb[2] * 255 / peak) | round(0) | int]) %}
+                {% elif 'color_temp' in (state_attr(repeat.item, 'supported_color_modes') or []) %}
+                  {% set lower = state_attr(repeat.item, 'min_color_temp_kelvin') | float(warm) %}
+                  {% set upper = state_attr(repeat.item, 'max_color_temp_kelvin') | float(daylight) %}
+                  {% set k = [[kelvin, lower] | max, upper] | min %}
+                  {% set payload = dict(payload, color_temp_kelvin=k | round(0) | int) %}
+                {% endif %}
+                {{ payload }}
+  # Wait for state reports from slow bulbs without extending the wake-up deadline.
+  - alias: Wait for all wake-up lights to report on
+    wait_template: "{{ not is_state(enabled_helper, 'on') or expand(members) | selectattr('state', 'eq', 'on') | list | length == members | length }}"
+    timeout:
+      seconds: "{{ [15, [finish - as_timestamp(now()), 0] | max] | min }}"
+    continue_on_timeout: true
+  - alias: Stop updates and cancel the saved run when disabled
+    if:
+      - condition: template
+        value_template: "{{ not is_state(enabled_helper, 'on') }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ recovery_helper != '' }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ recovery_helper }}"
+            data:
+              value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
+      - stop: Sunrise cancelled because its enabled helper is off or unavailable.
+  - if:
+      - condition: template
+        value_template: "{{ not wait.completed }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ recovery_helper != '' }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ recovery_helper }}"
+            data:
+              value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
+      - stop: Sunrise cancelled because wake-up lights did not all report on before the startup timeout or wake-up time.
+  - repeat:
+      while:
+        - condition: template
+          value_template: "{{ is_state(enabled_helper, 'on') }}"
+        - condition: template
+          value_template: "{{ as_timestamp(now()) < finish }}"
+        - condition: template
+          value_template: "{{ expand(members) | selectattr('state', 'eq', 'on') | list | length == members | length }}"
+      sequence:
+        - variables:
+            light_phase: ramp
+            # Capture the endpoint before calls; their latency consumes this interval.
+            step_deadline: >-
+              {% set current = as_timestamp(now()) %}
+              {% set deadline = [current + (interval | float), finish] | min %}
+              {% if style == 'colorful' and colorful_lights | length > 0 %}
+                {% set next_checkpoint = ((current - beginning) / (duration_seconds | float) * 4) | int + 1 %}
+                {% set deadline = [deadline, beginning + (duration_seconds | float) * next_checkpoint / 4] | min %}
+              {% endif %}
+              {{ deadline }}
+        - repeat:
+            for_each: "{{ members }}"
+            sequence:
+              - if:
+                  - condition: template
+                    value_template: "{{ is_state(enabled_helper, 'on') and is_state(repeat.item, 'on') }}"
+                then:
+                  - action: light.turn_on
+                    target:
+                      entity_id: "{{ repeat.item }}"
+                    data: *sunrise_light_payload
+        - wait_template: "{{ not is_state(enabled_helper, 'on') or expand(members) | selectattr('state', 'eq', 'on') | list | length != members | length }}"
+          timeout:
+            # Recalculate after commands, including a zero wait if they overran.
+            seconds: "{{ [step_deadline - as_timestamp(now()), 0] | max }}"
+          continue_on_timeout: true
+        # Persist cancellation immediately, even if the light is switched back on.
+        - if:
+            - condition: template
+              value_template: "{{ wait.completed }}"
+          then:
+            - if:
+                - condition: template
+                  value_template: "{{ recovery_helper != '' }}"
+              then:
+                - action: input_text.set_value
+                  target:
+                    entity_id: "{{ recovery_helper }}"
+                  data:
+                    value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
+            - stop: Sunrise cancelled because its enabled helper is off or unavailable, or a light was switched off or became unavailable.
+  - if:
+      - condition: template
+        value_template: "{{ not is_state(enabled_helper, 'on') or expand(members) | selectattr('state', 'eq', 'on') | list | length != members | length }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ recovery_helper != '' }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ recovery_helper }}"
+            data:
+              value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
+      - stop: Sunrise cancelled because its enabled helper is off or unavailable, or a light was switched off or became unavailable.
+  - condition: template
+    value_template: "{{ is_state(enabled_helper, 'on') and as_timestamp(now()) >= finish and expand(members) | selectattr('state', 'eq', 'on') | list | length == members | length }}"
+  - repeat:
+      for_each: "{{ members }}"
+      sequence:
+        - variables:
+            light_phase: final
+        - if:
+            - condition: template
+              value_template: "{{ is_state(enabled_helper, 'on') and is_state(repeat.item, 'on') }}"
+          then:
+            - action: light.turn_on
+              target:
+                entity_id: "{{ repeat.item }}"
+              data: *sunrise_light_payload
+  - alias: Check cancellation after final light commands
+    if:
+      - condition: template
+        value_template: "{{ not is_state(enabled_helper, 'on') or expand(members) | selectattr('state', 'eq', 'on') | list | length != members | length }}"
+    then:
+      - if:
+          - condition: template
+            value_template: "{{ recovery_helper != '' }}"
+        then:
+          - action: input_text.set_value
+            target:
+              entity_id: "{{ recovery_helper }}"
+            data:
+              value: "{{ 'cancelled|' ~ beginning ~ '|' ~ finish }}"
+      - stop: Sunrise cancelled because its enabled helper is off or unavailable, or a light was switched off or became unavailable.
+  # Mark complete before user actions so they are not replayed after a reload.
+  - if:
+      - condition: template
+        value_template: "{{ recovery_helper != '' }}"
+    then:
+      - action: input_text.set_value
+        target:
+          entity_id: "{{ recovery_helper }}"
+        data:
+          value: "{{ 'completed|' ~ beginning ~ '|' ~ finish }}"
+  - condition: template
+    value_template: "{{ is_state(enabled_helper, 'on') }}"
+  - choose: []
+    default: !input after_sunrise
