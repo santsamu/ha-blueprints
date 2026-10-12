@@ -17,6 +17,7 @@ BLUEPRINT = yaml.load(
     .read_text(encoding="utf-8"), Loader=Loader,
 )
 HELPER = "input_number.scene_position"
+DROPDOWN = "input_select.scenes"
 SCENES = ["scene.reading", "scene.relax", "scene.bright"]
 
 
@@ -80,6 +81,8 @@ class CycleSimulation:
                     if self.matches(branch["conditions"]):
                         self.execute(branch["sequence"])
                         break
+                else:
+                    self.execute(step.get("default", []))
             elif "if" in step:
                 if self.matches(step["if"]):
                     self.execute(step["then"])
@@ -92,6 +95,8 @@ class CycleSimulation:
                     raise Stopped("Scene service failed")
                 if payload["action"] == "input_number.set_value":
                     self.states[payload["target"]["entity_id"]] = str(payload["data"]["value"])
+                elif payload["action"] == "input_select.select_option":
+                    self.states[payload["target"]["entity_id"]] = payload["data"]["option"]
             else:
                 raise AssertionError(step)
 
@@ -112,6 +117,13 @@ class CycleSimulation:
 
 
 class SonoffSceneCycleTests(unittest.TestCase):
+    def dropdown_sim(self, option=None, options=None, **inputs):
+        sim = CycleSimulation(scene_source="dropdown", scene_dropdown=DROPDOWN,
+                              state_helper="", scenes=[], **inputs)
+        sim.states[DROPDOWN] = SCENES[-1] if option is None else option
+        sim.attrs[DROPDOWN] = {"options": SCENES.copy() if options is None else options}
+        return sim
+
     def test_three_scene_wraparound_uses_scene_count_with_maximum_three_or_four(self):
         for maximum in (3, 4):
             with self.subTest(maximum=maximum):
@@ -210,6 +222,67 @@ class SonoffSceneCycleTests(unittest.TestCase):
         sim = CycleSimulation()
         self.assertFalse(sim.run(None))
         self.assertEqual(sim.calls, [])
+
+    def test_dropdown_cycles_its_options_without_a_number_helper(self):
+        sim = self.dropdown_sim()
+        del sim.states[HELPER]
+        for scene in (*SCENES, SCENES[0]):
+            self.assertTrue(sim.run())
+            self.assertEqual(sim.calls[-2]["target"]["entity_id"], scene)
+            self.assertEqual(sim.states[DROPDOWN], scene)
+
+    def test_dropdown_current_selection_determines_the_next_scene(self):
+        sim = self.dropdown_sim(option=SCENES[0])
+        sim.run()
+        self.assertEqual(sim.states[DROPDOWN], SCENES[1])
+        self.assertEqual(sim.calls[-2]["target"]["entity_id"], SCENES[1])
+
+    def test_dropdown_options_are_read_again_for_each_press(self):
+        sim = self.dropdown_sim()
+        sim.run()
+        sim.attrs[DROPDOWN]["options"] = [SCENES[0], SCENES[2]]
+        sim.run()
+        self.assertEqual(sim.states[DROPDOWN], SCENES[2])
+        self.assertEqual(sim.calls[-2]["target"]["entity_id"], SCENES[2])
+        sim.states[DROPDOWN] = "removed-option"
+        sim.run()
+        self.assertEqual(sim.states[DROPDOWN], SCENES[0])
+
+    def test_invalid_dropdown_helpers_stop_without_using_the_number_mode(self):
+        for option in ("unknown", "unavailable"):
+            with self.subTest(option=option):
+                sim = self.dropdown_sim(option=option)
+                self.assertTrue(sim.run())
+                self.assertEqual(sim.calls, [])
+                self.assertIn("Dropdown helper", sim.reason)
+        sim = self.dropdown_sim(options=[])
+        self.assertTrue(sim.run())
+        self.assertEqual(sim.calls, [])
+        sim.config["variables"]["dropdown_helper"] = ""
+        self.assertFalse(sim.run())
+
+    def test_friendly_names_and_missing_dropdown_scenes_do_not_advance_selection(self):
+        for option in ("Reading", "scene.deleted"):
+            with self.subTest(option=option):
+                sim = self.dropdown_sim(option=SCENES[0], options=[SCENES[0], option])
+                self.assertTrue(sim.run())
+                self.assertEqual(sim.states[DROPDOWN], SCENES[0])
+                self.assertEqual(sim.calls, [])
+
+    def test_failed_dropdown_scene_activation_leaves_selection_unchanged(self):
+        sim = self.dropdown_sim(option=SCENES[0])
+        sim.fail_scene = True
+        sim.run()
+        self.assertEqual(sim.states[DROPDOWN], SCENES[0])
+        self.assertEqual(len(sim.calls), 1)
+
+    def test_press_and_hold_do_not_need_an_available_dropdown(self):
+        sim = self.dropdown_sim(option="unavailable", press_action=[{"action": "test.press"}],
+                                hold_action=[{"action": "test.hold"}])
+        sim.run("press")
+        sim.run("hold")
+        self.assertEqual([call["action"] for call in sim.calls], ["test.press", "test.hold"])
+        self.assertEqual(sim.states[DROPDOWN], "unavailable")
 
 
 if __name__ == "__main__":

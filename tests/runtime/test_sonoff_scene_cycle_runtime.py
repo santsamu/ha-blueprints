@@ -22,6 +22,7 @@ BLUEPRINT_PATH = "sonoff_zigbee_scene_cycle/sonoff_zigbee_scene_cycle.yaml"
 BUTTON = "scene-cycle-button"
 AUTOMATION = "automation.scene_cycle"
 HELPER = "input_number.cycle_position"
+DROPDOWN = "input_select.cycle_scenes"
 SCENES = ["scene.cycle_one", "scene.cycle_two", "scene.cycle_three"]
 GESTURE_EVENT = "scene_cycle_gesture"
 
@@ -69,11 +70,15 @@ class SonoffSceneCycleRuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.hass.async_stop(force=True)
 
-    async def load(self, *, maximum=3, position=0, scenes=None, press=None, hold=None):
+    async def load(self, *, maximum=3, position=0, scenes=None, press=None, hold=None,
+                   dropdown=False, options=None, selection=None):
         self.lamp = GateLight()
         inputs = {"button_id": BUTTON, "state_helper": HELPER,
                   "scenes": SCENES if scenes is None else scenes,
                   "press_action": press or [], "hold_action": hold or []}
+        if dropdown:
+            inputs.update(scene_source="dropdown", scene_dropdown=DROPDOWN,
+                          state_helper="", scenes=[])
         config = {"homeassistant": {
             "latitude": 47.0, "longitude": 8.0, "elevation": 400,
             "time_zone": "UTC", "unit_system": "metric", "currency": "CHF",
@@ -84,9 +89,18 @@ class SonoffSceneCycleRuntimeTests(unittest.IsolatedAsyncioTestCase):
         } for name, level in zip(("Cycle One", "Cycle Two", "Cycle Three"), (40, 80, 120))],
             "automation": [{"id": "scene_cycle", "alias": "Scene cycle",
                             "use_blueprint": {"path": BLUEPRINT_PATH, "input": inputs}}]}
+        if dropdown:
+            del config["input_number"]
+            config["input_select"] = {"cycle_scenes": {
+                "options": SCENES if options is None else options,
+            }}
         self.assertIs(await bootstrap.async_from_config_dict(config, self.hass), self.hass)
         await self.hass.data[light.DATA_COMPONENT].async_add_entities([self.lamp])
-        if position is not None:
+        if dropdown and selection is not None:
+            await self.hass.services.async_call("input_select", "select_option",
+                                                {"entity_id": DROPDOWN, "option": selection},
+                                                blocking=True)
+        elif not dropdown and position is not None:
             await self.set_position(position)
         await self.hass.async_start()
         await self.settle()
@@ -245,6 +259,64 @@ class SonoffSceneCycleRuntimeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.lamp.calls, [])
         await self.fire("toggle")
         self.assertEqual(self.gestures, ["press"])
+
+    async def test_dropdown_order_and_wraparound_need_no_number_helper(self):
+        order = [SCENES[2], SCENES[0], SCENES[1]]
+        await self.load(dropdown=True, options=order, selection=order[-1])
+        self.assertIsNone(self.hass.states.get(HELPER))
+        for scene in (*order, order[0]):
+            await self.fire()
+            self.assertEqual(self.hass.states.get(DROPDOWN).state, scene)
+        self.assertEqual([call["brightness"] for call in self.lamp.calls], [120, 40, 80, 120])
+
+    async def test_dropdown_queued_presses_read_updated_options_at_execution(self):
+        await self.load(dropdown=True, selection=SCENES[-1])
+        self.lamp.block_next = True
+        await self.fire(current=1)
+        await self.wait_until(self.lamp.entered.is_set)
+        await self.fire(current=2)
+        await self.hass.services.async_call("input_select", "set_options",
+                                            {"entity_id": DROPDOWN, "options": [SCENES[0], SCENES[2]]},
+                                            blocking=True)
+        self.lamp.release.set()
+        await self.wait_until(lambda: self.current() == 0 and len(self.lamp.calls) == 2)
+        self.assertEqual([call["brightness"] for call in self.lamp.calls], [40, 120])
+        self.assertEqual(self.hass.states.get(DROPDOWN).state, SCENES[2])
+
+    async def test_failed_scene_call_leaves_dropdown_selection_unchanged(self):
+        await self.load(dropdown=True, selection=SCENES[0])
+
+        async def fail_scene(call):
+            raise HomeAssistantError("Simulated dropdown scene failure")
+
+        self.hass.services.async_register("scene", "turn_on", fail_scene)
+        await self.fire()
+        self.assertEqual(self.hass.states.get(DROPDOWN).state, SCENES[0])
+        self.assertEqual(self.lamp.calls, [])
+
+    async def test_missing_scene_and_unavailable_dropdown_do_not_activate_scenes(self):
+        await self.load(dropdown=True, selection=SCENES[0], press=self.gesture_action("press"))
+        self.hass.states.async_remove(SCENES[1])
+        await self.fire()
+        self.assertEqual(self.hass.states.get(DROPDOWN).state, SCENES[0])
+        state = self.hass.states.get(DROPDOWN)
+        self.hass.states.async_set(DROPDOWN, "unavailable", state.attributes)
+        await self.fire()
+        await self.fire("toggle")
+        self.assertEqual(self.gestures, ["press"])
+        self.assertEqual(self.lamp.calls, [])
+
+    async def test_dropdown_selection_survives_home_assistant_restart(self):
+        await self.load(dropdown=True, selection=SCENES[-1])
+        await self.fire()
+        await self.fire()
+        self.assertEqual(self.hass.states.get(DROPDOWN).state, SCENES[1])
+        await self.hass.async_stop(force=True)
+        self.new_hass()
+        await self.load(dropdown=True)
+        self.assertEqual(self.hass.states.get(DROPDOWN).state, SCENES[1])
+        await self.fire()
+        self.assertEqual(self.hass.states.get(DROPDOWN).state, SCENES[2])
 
 
 if __name__ == "__main__":

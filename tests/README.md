@@ -24,6 +24,8 @@ Sonoff checks evaluate the actual blueprint's gesture conditions, including
 empty gestures during restart mode and configured gestures passing the guard.
 Scene-cycle checks cover scene-count wraparound, invalid positions and helpers,
 missing scenes, failed scene calls, resets, and independent gesture actions.
+Dropdown checks cover option ordering, current selection, dynamic lists, invalid
+helpers, and failed activation without changing the selection.
 They do not replace validation in a running Home Assistant instance or testing
 with real bulbs or buttons.
 
@@ -38,6 +40,8 @@ the script engine and blueprint importer are not simulated.
 Scene-cycle tests use native scenes, recording lights, and a Number helper to
 verify ordered activation, queued presses, overflow, errors, and helper restoration
 after a Home Assistant restart.
+Both Number and Dropdown modes run through the native scene and helper services;
+queued dropdown presses also verify that changed options are read at execution.
 
 Sunrise tests use the native light service and recording light entities in place
 of hardware. They verify blueprint import, RGB conversion to each supported color
@@ -98,8 +102,8 @@ docker run --rm `
   python:3.14-slim sh -c 'python -m pip install -q -r tests/runtime/requirements-2026.10.0.txt && python -m unittest discover -s tests/runtime -v'
 ```
 
-Successful suites finish with `OK`: currently **101 simulation checks** and
-**31 runtime tests per Home Assistant version**. If installation or a test suite
+Successful suites finish with `OK`: currently **108 simulation checks** and
+**36 runtime tests per Home Assistant version**. If installation or a test suite
 fails, the command exits with a nonzero code; check `$LASTEXITCODE` immediately
 after the Docker command.
 

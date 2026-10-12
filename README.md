@@ -9,7 +9,7 @@ A collection of automation blueprints for Home Assistant. Each blueprint has its
 | [Sunrise Wake-up](sunrise_wake_up/README.md) | Gradually brighten your lights using a manual time, a time helper, or your next phone alarm, with a white fade or five editable sunrise colors. | 2024.10.0 |
 | [Sunrise Wake-up Simple](sunrise_wake_up_simple/README.md) | A time-helper sunrise with an on/off helper, white or colorful light settings, wake-up days, recovery, and wake-up actions. | 2024.10.0 |
 | [Sonoff Zigbee Button](sonoff_zigbee_button/README.md) | Assign actions to press, double press, and hold on a SONOFF button paired through ZHA. | 2024.10.0 |
-| [SONOFF Zigbee Scene Cycle](sonoff_zigbee_scene_cycle/README.md) | Cycle through ordered scenes on double press, with a persistent position helper and separate single-press and hold actions. | 2024.10.0 |
+| [SONOFF Zigbee Scene Cycle](sonoff_zigbee_scene_cycle/README.md) | Cycle scenes on double press using a Number helper or a Dropdown scene list, with separate single-press and hold actions. | 2024.10.0 |
 
 ## Getting started
 

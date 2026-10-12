@@ -3,7 +3,8 @@ blueprint:
   description: >-
     Cycle through an ordered list of scenes with each double press of a SONOFF
     Zigbee button paired through ZHA. Supports eWeLink WB01 and SNZB-01P.
-    A dedicated Number helper stores the last selected position. Single press
+    Use a scene list with a Number helper, or a Dropdown helper whose options
+    are scene entity IDs and whose selection stores the current position. Single press
     and hold run their own optional actions without advancing the cycle.
     After the last scene, the next double press selects the first scene.
     Gestures run in order, with up to 10 active and waiting runs; overflow is logged.
@@ -25,10 +26,34 @@ blueprint:
               manufacturer: eWeLink
               model: SNZB-01P
           multiple: false
+    scene_source:
+      name: Scene cycle source
+      default: number
+      selector:
+        select:
+          options:
+            - label: Scene list and Number helper
+              value: number
+            - label: Dropdown helper
+              value: dropdown
+    scene_dropdown:
+      name: Scene dropdown helper
+      description: >-
+        Used only in Dropdown helper mode. Select a dedicated input_select whose
+        options are scene entity IDs in cycle order, such as scene.reading.
+        Double press activates the option after the current selection, wrapping
+        to the first. Select the last option once to start with the first scene.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: input_select
+          multiple: false
     scenes:
       name: Scenes in cycle order
       description: >-
-        Select scenes in the order they should be activated. The saved list order
+        Used only in Scene list and Number helper mode. Select scenes in the
+        order they should be activated. The saved list order
         determines scene numbers. Double press is ignored when this list is empty.
       default: []
       selector:
@@ -39,10 +64,12 @@ blueprint:
     state_helper:
       name: Scene position helper
       description: >-
-        Select a dedicated Number helper (input_number) with minimum 0, maximum
+        Used only in Scene list and Number helper mode. Select a dedicated
+        Number helper (input_number) with minimum 0, maximum
         at least the number of scenes, and step 1. Set it to 0 once to start with
         scene 1. Leave initial unset in YAML to restore the position after restarts.
         Do not share this helper with another scene-cycle automation.
+      default: ""
       selector:
         entity:
           filter:
@@ -66,8 +93,10 @@ max: 10
 max_exceeded: warning
 
 variables:
+  cycle_mode: !input scene_source
   cycle_scenes: !input scenes
   position_helper: !input state_helper
+  dropdown_helper: !input scene_dropdown
 
 triggers:
   - trigger: event
@@ -100,8 +129,10 @@ conditions:
   - condition: template
     value_template: >-
       {{ trigger is defined and
-         ((trigger.id == 'double_press' and selected_scenes is defined and
-           selected_scenes | length > 0) or
+         ((trigger.id == 'double_press' and
+           ((cycle_mode == 'number' and selected_scenes is defined and
+             selected_scenes | length > 0) or
+            (cycle_mode == 'dropdown' and dropdown_helper != ''))) or
           (trigger.id in ['press', 'hold'] and selected_action_sequence is defined and
            selected_action_sequence | length > 0)) }}
 
@@ -117,26 +148,51 @@ actions:
         sequence:
           # Read mutable state here, after earlier queued gestures have completed.
           - variables:
-              scene_count: "{{ cycle_scenes | length }}"
-          - alias: Validate the scene position helper
-            if:
-              - condition: template
-                value_template: >-
-                  {{ not (position_helper.startswith('input_number.') and
-                          is_number(states(position_helper)) and
-                          (state_attr(position_helper, 'min') | float(1)) == 0 and
-                          (state_attr(position_helper, 'max') | float(-1)) >= scene_count and
-                          (state_attr(position_helper, 'step') | float(0)) == 1) }}
-            then:
-              - stop: Scene cycle stopped. Select an available Number helper with minimum 0, maximum at least scene_count, and step 1.
-                error: true
+              active_scenes: >-
+                {{ (state_attr(dropdown_helper, 'options') or [])
+                   if cycle_mode == 'dropdown' else cycle_scenes }}
+              scene_count: "{{ active_scenes | length }}"
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ cycle_mode == 'dropdown' }}"
+                sequence:
+                  - alias: Validate the scene dropdown helper
+                    if:
+                      - condition: template
+                        value_template: >-
+                          {{ not (dropdown_helper.startswith('input_select.') and
+                                  states(dropdown_helper) not in ['unknown', 'unavailable'] and
+                                  scene_count > 0) }}
+                    then:
+                      - stop: Scene cycle stopped. Select an available Dropdown helper with scene entity IDs as its options.
+                        error: true
+            default:
+              - alias: Validate the scene position helper
+                if:
+                  - condition: template
+                    value_template: >-
+                      {{ not (position_helper.startswith('input_number.') and
+                              is_number(states(position_helper)) and
+                              (state_attr(position_helper, 'min') | float(1)) == 0 and
+                              (state_attr(position_helper, 'max') | float(-1)) >= scene_count and
+                              (state_attr(position_helper, 'step') | float(0)) == 1) }}
+                then:
+                  - stop: Scene cycle stopped. Select an available Number helper with minimum 0, maximum at least scene_count, and step 1.
+                    error: true
           - variables:
-              current_position: "{{ states(position_helper) | float }}"
+              current_position: "{{ states(position_helper) | float(0) if cycle_mode == 'number' else 0 }}"
+              current_option: "{{ states(dropdown_helper) if cycle_mode == 'dropdown' else '' }}"
               next_position: >-
-                {{ (current_position | int) + 1
-                   if current_position == (current_position | int) and
-                      0 <= current_position < scene_count else 1 }}
-              selected_scene: "{{ cycle_scenes[(next_position | int) - 1] }}"
+                {% if cycle_mode == 'dropdown' %}
+                  {{ (active_scenes.index(current_option) + 1) % scene_count + 1
+                     if current_option in active_scenes else 1 }}
+                {% else %}
+                  {{ (current_position | int) + 1
+                     if current_position == (current_position | int) and
+                        0 <= current_position < scene_count else 1 }}
+                {% endif %}
+              selected_scene: "{{ active_scenes[(next_position | int) - 1] }}"
           - alias: Validate the next scene
             if:
               - condition: template
@@ -151,11 +207,22 @@ actions:
             target:
               entity_id: "{{ selected_scene }}"
           # A failed scene service call stops the sequence before this write.
-          - action: input_number.set_value
-            target:
-              entity_id: "{{ position_helper }}"
-            data:
-              value: "{{ next_position | int }}"
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ cycle_mode == 'dropdown' }}"
+                sequence:
+                  - action: input_select.select_option
+                    target:
+                      entity_id: "{{ dropdown_helper }}"
+                    data:
+                      option: "{{ selected_scene }}"
+            default:
+              - action: input_number.set_value
+                target:
+                  entity_id: "{{ position_helper }}"
+                data:
+                  value: "{{ next_position | int }}"
       - conditions:
           - condition: trigger
             id: hold
