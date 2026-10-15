@@ -26,6 +26,12 @@ Scene-cycle checks cover scene-count wraparound, invalid positions and helpers,
 missing scenes, failed scene calls, resets, and independent gesture actions.
 Dropdown checks cover option ordering, current selection, dynamic lists, invalid
 helpers, and failed activation without changing the selection.
+Motion-light template checks cover duration conversion, daylight source gating,
+profile selection, supported command parameters, color normalization, temperature
+limits, startup confirmation, rounding tolerances, and override comparisons for
+all native light color modes.
+Legacy color-mode enum reports are normalized before native template values are
+stored, so older Home Assistant light reports remain usable.
 They do not replace validation in a running Home Assistant instance or testing
 with real bulbs or buttons.
 
@@ -51,6 +57,16 @@ They also verify scheduling from a native time-only Input Datetime helper.
 The helper-only blueprint is imported separately to verify white and colorful
 styles, toggle gating, native wait cancellation, and cancelled recovery records.
 
+Motion-light tests import the blueprint and use native motion state triggers and
+recording light entities. They cover fixed and resettable timers, independent
+off-only checks, day/night profiles, all native color conversions, command failures,
+unconfirmed startup, changes during other lights' startup, reverted overrides,
+power changes, unavailability, rounding, repeated motion, fresh sessions, and
+reload/disable cancellation. The session remains locked until its deadline even
+if all lights have been released. These scenarios require Home Assistant 2025.4
+variable scoping and are explicitly skipped on 2024.10; a native blueprint
+minimum-version validation test runs on every release.
+
 Run on Linux with Python 3.12 for the minimum supported Home Assistant release:
 
 ```text
@@ -60,12 +76,16 @@ python -m unittest discover -s tests/runtime -v
 
 Use a separate environment with Python 3.14.2 or newer and install
 `tests/runtime/requirements-2026.10.0.txt` to test the other CI matrix entry.
+For the motion-light blueprint's minimum release, use Python 3.13 and
+`tests/runtime/requirements-2025.4.0.txt`. Its pinned dependencies may need C and C++
+compilers and Python development headers on Linux; GitHub's Ubuntu runners
+already provide them.
 The version-specific requirements pin Home Assistant and keep the older release's
 ACME dependency compatible. The runtime suite fails if Home Assistant is missing;
 it does not silently skip tests.
 
 [GitHub Actions](../.github/workflows/blueprint-tests.yml) runs the simulation
-checks and both pinned runtime versions on pushes and pull requests. Run the
+checks and all three pinned runtime versions on pushes and pull requests. Run the
 two discovery commands above to include both suites locally.
 
 No Zigbee coordinator, paired button, helpers, or live Home Assistant installation
@@ -102,8 +122,22 @@ docker run --rm `
   python:3.14-slim sh -c 'python -m pip install -q -r tests/runtime/requirements-2026.10.0.txt && python -m unittest discover -s tests/runtime -v'
 ```
 
-Successful suites finish with `OK`: currently **108 simulation checks** and
-**36 runtime tests per Home Assistant version**. If installation or a test suite
+Also verify the motion-light blueprint's minimum, **2025.4.0**. Its older pinned
+dependencies need a compiler in the slim Python image:
+
+```powershell
+docker run --rm `
+  --mount "type=bind,source=$repoPath,target=/workspace,readonly" `
+  --workdir /workspace `
+  --env PYTHONDONTWRITEBYTECODE=1 `
+  --env DEBIAN_FRONTEND=noninteractive `
+  python:3.13-slim sh -c 'apt-get update -qq && apt-get install -y -qq --no-install-recommends gcc g++ libc6-dev && python -m pip install -q -r tests/runtime/requirements-2025.4.0.txt && python -m unittest discover -s tests/runtime -v'
+```
+
+Successful suites finish with `OK`: currently **123 simulation checks** and
+**63 runtime tests** on Home Assistant 2025.4 and 2026.10. On 2024.10, **37 runtime
+tests execute and 26 motion-light scenarios are skipped** because the blueprint
+declares a newer minimum; its minimum-version guard is still tested. If installation or a test suite
 fails, the command exits with a nonzero code; check `$LASTEXITCODE` immediately
 after the Docker command.
 

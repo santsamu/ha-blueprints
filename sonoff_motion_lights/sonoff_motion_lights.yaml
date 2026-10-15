@@ -1,0 +1,427 @@
+blueprint:
+  name: SONOFF SNZB-03P Motion Lights
+  description: >-
+    Turn on one or more lights on motion, with brightness and either color or
+    white temperature. Use one profile or separate day/night profiles. Each
+    light whose settings change during the session is left on at timeout.
+    Works with motion/occupancy binary sensors from ZHA or Zigbee2MQTT.
+    No helpers are required. Active sessions do not survive restart or reload.
+  domain: automation
+  homeassistant:
+    min_version: "2025.4.0"
+  source_url: https://github.com/santsamu/ha-blueprints/blob/main/sonoff_motion_lights/sonoff_motion_lights.yaml
+  input:
+    motion_sensor:
+      name: Motion sensor
+      description: Select the SNZB-03P motion or occupancy binary sensor.
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+              device_class: motion
+            - domain: binary_sensor
+              device_class: occupancy
+    lights:
+      name: Lights
+      description: Select individual lights so changes can be protected independently.
+      selector:
+        entity:
+          filter:
+            - domain: light
+          multiple: true
+    duration:
+      name: Duration
+      description: Fixed on-time, or time after the motion sensor clears. Must exceed zero.
+      default: {minutes: 2}
+      selector:
+        duration: {}
+    timer_mode:
+      name: Timer mode
+      default: motion_clear
+      selector:
+        select:
+          options:
+            - {label: After motion clears (reset on further motion), value: motion_clear}
+            - {label: Fixed duration from activation, value: fixed}
+    only_if_off:
+      name: Only control lights that are off
+      description: >-
+        Check each light independently. When disabled, already-on lights also
+        receive the profile and may be switched off at timeout.
+      default: true
+      selector:
+        boolean: {}
+    daylight_mode:
+      name: Daylight settings
+      description: >-
+        Shared uses the main profile at all times. Sun uses sun.sun for day/night.
+        Binary sensor uses an optional sensor whose on state means daylight/bright.
+        The profile is selected once per session. An unavailable daylight source
+        prevents activation in the corresponding mode.
+      default: shared
+      selector:
+        select:
+          options:
+            - {label: One shared profile, value: shared}
+            - {label: Day/night profiles using the sun, value: sun}
+            - {label: Day/night profiles using a daylight binary sensor, value: binary}
+    daylight_sensor:
+      name: Daylight binary sensor (optional)
+      description: >-
+        Used only in Binary sensor mode. On must mean bright/day, off dark/night.
+        Select the sensor's exposed light entity only if it has these semantics;
+        otherwise use Sun mode or a template binary sensor. A lux sensor is not accepted.
+      default: ""
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+    day_style:
+      name: Main/day light mode
+      default: temperature
+      selector:
+        select:
+          options:
+            - {label: White temperature, value: temperature}
+            - {label: Color, value: color}
+            - {label: Keep existing color, value: keep}
+    day_brightness:
+      name: Main/day brightness
+      default: 80
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+    day_temperature:
+      name: Main/day white temperature
+      description: Also used for tunable-white fallback in Color mode. Clamped per light.
+      default: 4000
+      selector:
+        color_temp:
+          unit: kelvin
+          min: 1500
+          max: 9000
+    day_color:
+      name: Main/day color
+      description: Choose a non-black color. Brightness is set separately.
+      default: [255, 200, 140]
+      selector:
+        color_rgb: {}
+    night_style:
+      name: Night light mode
+      default: temperature
+      selector:
+        select:
+          options:
+            - {label: White temperature, value: temperature}
+            - {label: Color, value: color}
+            - {label: Keep existing color, value: keep}
+    night_brightness:
+      name: Night brightness
+      default: 20
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+    night_temperature:
+      name: Night white temperature
+      description: Also used for tunable-white fallback in Color mode. Clamped per light.
+      default: 2700
+      selector:
+        color_temp:
+          unit: kelvin
+          min: 1500
+          max: 9000
+    night_color:
+      name: Night color
+      default: [255, 80, 20]
+      selector:
+        color_rgb: {}
+
+mode: single
+max_exceeded: silent
+
+variables:
+  selected_lights: !input lights
+  motion_entity: !input motion_sensor
+  duration_input: !input duration
+  timer: !input timer_mode
+  off_only: !input only_if_off
+  daylight: !input daylight_mode
+  daylight_entity: !input daylight_sensor
+  main_style: !input day_style
+  main_brightness: !input day_brightness
+  main_temperature: !input day_temperature
+  main_color: !input day_color
+  dark_style: !input night_style
+  dark_brightness: !input night_brightness
+  dark_temperature: !input night_temperature
+  dark_color: !input night_color
+  duration_seconds: >-
+    {{ (duration_input.get('days', 0) | float(0)) * 86400
+       + (duration_input.get('hours', 0) | float(0)) * 3600
+       + (duration_input.get('minutes', 0) | float(0)) * 60
+       + (duration_input.get('seconds', 0) | float(0))
+       + (duration_input.get('milliseconds', 0) | float(0)) / 1000 }}
+
+triggers:
+  - trigger: state
+    entity_id: !input motion_sensor
+    from: "off"
+    to: "on"
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ is_state(motion_entity, 'on') and duration_seconds > 0
+         and selected_lights | length > 0
+         and (daylight == 'shared'
+              or (daylight == 'sun' and states('sun.sun') in ['above_horizon', 'below_horizon'])
+              or (daylight == 'binary' and states(daylight_entity) in ['on', 'off'])) }}
+
+actions:
+  - variables:
+      session_start: "{{ as_timestamp(now()) }}"
+      night: >-
+        {{ (daylight == 'sun' and is_state('sun.sun', 'below_horizon'))
+           or (daylight == 'binary' and is_state(daylight_entity, 'off')) }}
+      style: "{{ dark_style if night else main_style }}"
+      brightness: "{{ dark_brightness if night else main_brightness }}"
+      temperature: "{{ dark_temperature if night else main_temperature }}"
+      color: "{{ dark_color if night else main_color }}"
+      tracked: []
+  - condition: template
+    value_template: "{{ style != 'color' or color | max > 0 }}"
+  - repeat:
+      for_each: "{{ selected_lights | unique | list }}"
+      sequence:
+        - variables:
+            observed_entity: "{{ repeat.item }}"
+        - if:
+            - condition: template
+              value_template: >-
+                {{ states(observed_entity) in ['on', 'off']
+                   and (not off_only or is_state(observed_entity, 'off')) }}
+          then:
+            - variables:
+                # Older HA versions expose ColorMode enum objects. Normalize
+                # before returning a native template value, avoiding enum reprs.
+                modes: >-
+                  {% set ns = namespace(items=[]) %}
+                  {% for mode in state_attr(observed_entity, 'supported_color_modes') or [] %}
+                    {% set ns.items = ns.items + ['' ~ mode] %}
+                  {% endfor %}
+                  {{ ns.items }}
+                command: >-
+                  {% set ns = namespace(data={}) %}
+                  {% if modes | reject('in', ['onoff', 'unknown']) | list | length > 0 %}
+                    {% set ns.data = dict(ns.data, brightness=(brightness * 255 / 100) | round(0) | int) %}
+                  {% endif %}
+                  {% if style == 'color' and modes | select('in', ['rgb', 'rgbw', 'rgbww', 'hs', 'xy']) | list | length > 0 %}
+                    {% set scale = 255 / (color | max) %}
+                    {% set rgb = [(color[0] * scale) | round(0) | int,
+                                  (color[1] * scale) | round(0) | int,
+                                  (color[2] * scale) | round(0) | int] %}
+                    {% set ns.data = dict(ns.data, rgb_color=rgb) %}
+                  {% elif style != 'keep' and 'color_temp' in modes %}
+                    {% set low = state_attr(observed_entity, 'min_color_temp_kelvin') | float(1500) %}
+                    {% set high = state_attr(observed_entity, 'max_color_temp_kelvin') | float(9000) %}
+                    {% set kelvin = [[temperature, low] | max, high] | min | int %}
+                    {% set ns.data = dict(ns.data, color_temp_kelvin=kelvin) %}
+                  {% endif %}
+                  {% if (state_attr(observed_entity, 'supported_features') | int(0) | bitwise_and(32)) != 0 %}
+                    {% set ns.data = dict(ns.data, transition=0) %}
+                  {% endif %}
+                  {{ ns.data }}
+            - action: light.turn_on
+              continue_on_error: true
+              target:
+                entity_id: "{{ observed_entity }}"
+              data: "{{ command }}"
+            # Do not adopt a light that never reports the requested settings.
+            # Zero transitions avoid interpreting our own fade as an override.
+            - wait_template: &confirmed >-
+                {% set ns = namespace(ok=is_state(observed_entity, 'on')) %}
+                {% if 'brightness' in command %}
+                  {% set ns.ok = ns.ok and state_attr(observed_entity, 'brightness') is number
+                     and ((state_attr(observed_entity, 'brightness') | float(0)) - command.brightness) | abs <= 1 %}
+                {% endif %}
+                {% if 'color_temp_kelvin' in command %}
+                  {% set ns.ok = ns.ok and state_attr(observed_entity, 'color_mode') == 'color_temp'
+                     and state_attr(observed_entity, 'color_temp_kelvin') is number
+                     and ((state_attr(observed_entity, 'color_temp_kelvin') | float(0)) - command.color_temp_kelvin) | abs <= 25 %}
+                {% elif 'rgb_color' in command %}
+                  {% set actual = state_attr(observed_entity, 'rgb_color') or [] %}
+                  {% set ns.ok = ns.ok and actual | length == 3
+                     and state_attr(observed_entity, 'color_mode') in ['rgb', 'rgbw', 'rgbww', 'hs', 'xy'] %}
+                  {% if actual | length == 3 %}
+                    {% for i in range(3) %}
+                      {% set ns.ok = ns.ok and (actual[i] - command.rgb_color[i]) | abs <= 12 %}
+                    {% endfor %}
+                  {% endif %}
+                {% endif %}
+                {{ ns.ok }}
+              timeout: {seconds: 2}
+              continue_on_timeout: true
+            - if:
+                - condition: template
+                  value_template: *confirmed
+              then:
+                - variables:
+                    observed: &snapshot >-
+                      {% set s = states[observed_entity] %}
+                      {% set a = s.attributes %}
+                      {% set attrs = dict(color_mode=('' ~ a.get('color_mode')),
+                         brightness=a.get('brightness'), color_temp_kelvin=a.get('color_temp_kelvin'),
+                         rgb_color=a.get('rgb_color'), rgbw_color=a.get('rgbw_color'),
+                         rgbww_color=a.get('rgbww_color'), hs_color=a.get('hs_color'), xy_color=a.get('xy_color')) %}
+                      {{ dict(entity_id=observed_entity, state=s.state, attributes=attrs,
+                              updated=as_timestamp(s.last_updated), changed=as_timestamp(s.last_changed)) }}
+                    tracked: "{{ tracked + [observed] }}"
+  - condition: template
+    value_template: "{{ tracked | length > 0 }}"
+  # A single event loop retains ownership across further motion. In particular,
+  # restart mode would erase the sticky list of lights released by an override.
+  - repeat:
+      while:
+        - condition: template
+          value_template: "{{ true }}"
+      sequence:
+        - variables:
+            # Catch updates that arrived between waits or during startup. Even a
+            # change followed by a reversion advances last_updated. If we missed
+            # the event, release conservatively rather than overwrite user intent.
+            tracked: >-
+              {% set ns = namespace(items=[]) %}
+              {% for item in tracked %}
+                {% set s = states[item.entity_id] %}
+                {% if s is defined and s.state == 'on' and as_timestamp(s.last_updated) == item.updated %}
+                  {% set ns.items = ns.items + [item] %}
+                {% endif %}
+              {% endfor %}
+              {{ ns.items }}
+            deadline: >-
+              {% if timer == 'fixed' %}
+                {{ session_start + duration_seconds }}
+              {% elif is_state(motion_entity, 'off') %}
+                {{ as_timestamp(states[motion_entity].last_changed) + duration_seconds }}
+              {% else %}
+                {{ 0 }}
+              {% endif %}
+            remaining: "{{ deadline - as_timestamp(now()) if deadline > 0 else 86400 }}"
+        - if:
+            - condition: template
+              value_template: "{{ states(motion_entity) not in ['on', 'off'] }}"
+          then:
+            - stop: Motion sensor is unavailable
+        - if:
+            - condition: template
+              value_template: "{{ remaining <= 0 }}"
+          then:
+            - repeat:
+                for_each: "{{ tracked }}"
+                sequence:
+                  - variables:
+                      reference: "{{ repeat.item }}"
+                      observed_entity: "{{ reference.entity_id }}"
+                      observed: *snapshot
+                  - if:
+                      - condition: template
+                        value_template: "{{ observed.updated == reference.updated }}"
+                      - condition: template
+                        value_template: &unchanged >-
+                          {% set a = reference.attributes %}
+                          {% set b = observed.attributes %}
+                          {% set mode = a.get('color_mode') %}
+                          {% set ns = namespace(ok=observed.state == 'on'
+                             and observed.changed == reference.changed
+                             and b.get('color_mode') == mode) %}
+                          {% set av = a.get('brightness') %}
+                          {% set bv = b.get('brightness') %}
+                          {% set ns.ok = ns.ok and ((av is none and bv is none)
+                             or (av is number and bv is number and (av - bv) | abs <= 1)) %}
+                          {% set key = {'color_temp':'color_temp_kelvin', 'rgb':'rgb_color',
+                             'rgbw':'rgbw_color', 'rgbww':'rgbww_color', 'hs':'hs_color', 'xy':'xy_color'}.get(mode) %}
+                          {% if key %}
+                            {% set av = a.get(key) %}
+                            {% set bv = b.get(key) %}
+                            {% if mode == 'color_temp' %}
+                              {% set ns.ok = ns.ok and av is number and bv is number and (av - bv) | abs <= 25 %}
+                            {% elif av is sequence and bv is sequence and av | length == bv | length %}
+                              {% set tolerance = 0.001 if mode == 'xy' else (0.5 if mode == 'hs' else 1) %}
+                              {% for i in range(av | length) %}
+                                {% set difference = (av[i] - bv[i]) | abs %}
+                                {% if mode == 'hs' and i == 0 %}
+                                  {% set difference = [difference, (360 - difference) | abs] | min %}
+                                {% endif %}
+                                {% set ns.ok = ns.ok and difference <= tolerance %}
+                              {% endfor %}
+                            {% else %}
+                              {% set ns.ok = false %}
+                            {% endif %}
+                          {% endif %}
+                          {{ ns.ok }}
+                    then:
+                      - action: light.turn_off
+                        continue_on_error: true
+                        target:
+                          entity_id: "{{ observed_entity }}"
+            - stop: Lighting session finished
+        - wait_for_trigger:
+            - trigger: state
+              entity_id: !input lights
+              id: light_update
+            - trigger: state
+              entity_id: !input motion_sensor
+              id: motion_update
+            # Recent HA versions can preserve an unchanged automation on reload.
+            # Explicitly end its session even when the engine keeps it running.
+            - trigger: event
+              event_type: automation_reloaded
+              id: reload
+          timeout:
+            seconds: "{{ remaining }}"
+          continue_on_timeout: true
+        - if:
+            - condition: template
+              value_template: "{{ wait.trigger is not none and wait.trigger.id == 'reload' }}"
+          then:
+            - stop: Automations reloaded; leave lights as they are
+        - if:
+            - condition: template
+              value_template: "{{ wait.trigger is not none and wait.trigger.id == 'light_update' }}"
+          then:
+            - variables:
+                matches: "{{ tracked | selectattr('entity_id', 'eq', wait.trigger.entity_id) | list }}"
+            - if:
+                - condition: template
+                  value_template: "{{ matches | length > 0 }}"
+              then:
+                - variables:
+                    reference: "{{ matches[0] }}"
+                    observed: >-
+                      {% set s = wait.trigger.to_state %}
+                      {% set a = s.attributes if s else {} %}
+                      {% set attrs = dict(color_mode=('' ~ a.get('color_mode')),
+                         brightness=a.get('brightness'), color_temp_kelvin=a.get('color_temp_kelvin'),
+                         rgb_color=a.get('rgb_color'), rgbw_color=a.get('rgbw_color'),
+                         rgbww_color=a.get('rgbww_color'), hs_color=a.get('hs_color'), xy_color=a.get('xy_color')) %}
+                      {{ dict(entity_id=reference.entity_id, state=s.state if s else 'unavailable',
+                              attributes=attrs,
+                              updated=as_timestamp(s.last_updated) if s else 0,
+                              changed=as_timestamp(s.last_changed) if s else 0) }}
+                    unchanged: *unchanged
+                    tracked: >-
+                      {% set ns = namespace(items=[]) %}
+                      {% for item in tracked %}
+                        {% if item.entity_id != reference.entity_id %}
+                          {% set ns.items = ns.items + [item] %}
+                        {% elif unchanged %}
+                          {% set ns.items = ns.items + [dict(item, updated=observed.updated)] %}
+                        {% endif %}
+                      {% endfor %}
+                      {{ ns.items }}

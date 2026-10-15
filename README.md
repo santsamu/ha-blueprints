@@ -10,6 +10,7 @@ A collection of automation blueprints for Home Assistant. Each blueprint has its
 | [Sunrise Wake-up Simple](sunrise_wake_up_simple/README.md) | A time-helper sunrise with an on/off helper, white or colorful light settings, wake-up days, recovery, and wake-up actions. | 2024.10.0 |
 | [Sonoff Zigbee Button](sonoff_zigbee_button/README.md) | Assign actions to press, double press, and hold on a SONOFF button paired through ZHA. | 2024.10.0 |
 | [SONOFF Zigbee Scene Cycle](sonoff_zigbee_scene_cycle/README.md) | Cycle scenes on double press using a Number helper or a Dropdown scene list, with separate single-press and hold actions. | 2024.10.0 |
+| [SONOFF SNZB-03P Motion Lights](sonoff_motion_lights/README.md) | Motion lighting with day/night color, temperature and brightness profiles, resettable or fixed timers, and protection for changed lights. | 2025.4.0 |
 
 ## Getting started
 
@@ -22,8 +23,9 @@ See the official [Using automation blueprints](https://www.home-assistant.io/doc
 ## Automated checks
 
 See [Blueprint checks](tests/README.md) for local test commands. GitHub Actions
-runs the simulation checks and Sonoff and sunrise tests using Home Assistant's actual runtime
-on the minimum supported release and a newer pinned release.
+runs the simulation checks and Sonoff, sunrise, and motion-light tests using
+Home Assistant's actual runtime on the minimum supported releases and a newer
+pinned release.
 
 ## Repository layout
 
@@ -40,4 +42,7 @@ sonoff_zigbee_button/
 sonoff_zigbee_scene_cycle/
   README.md                 Setup and scene-cycle behavior
   sonoff_zigbee_scene_cycle.yaml  Scene-cycle blueprint
+sonoff_motion_lights/
+  README.md                 Setup, timing, and manual override behavior
+  sonoff_motion_lights.yaml  Motion lighting with independent light protection
 ```
